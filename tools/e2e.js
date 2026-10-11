@@ -86,10 +86,14 @@ const PNG_1PX = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUl
   async function prepare(page, opt) {
     await page.route('**/config.js*', async route => {
       const res = await route.fetch();
-      let body = (await res.text()).replace('apiUrl: ""', `apiUrl: "http://localhost:${API}/exec"`);
+      const text = await res.text();
+      let body = text.replace(/apiUrl:\s*"[^"]*"/, `apiUrl: "http://localhost:${API}/exec"`);
+      if (body === text) throw new Error('config.js の apiUrl を、テスト用の保存先に書きかえられませんでした');
       if (!(opt && opt.guard)) body = body.replace('window.KS_CONFIG = {', 'window.KS_CONFIG = { tapGuardMs: 0,');
       await route.fulfill({ response: res, body });
     });
+    // 念のため：本物の保存先（Google）へは、テストからは決して送らない
+    await page.route('https://script.google.com/**', route => { errors.push('本物の保存先へ送ろうとした: ' + route.request().url()); return route.abort(); });
     page.on('pageerror', e => errors.push('pageerror: ' + e.message));
     page.on('console', m => { if (m.type() === 'error' && !/Failed to load resource|net::ERR_/.test(m.text())) errors.push('console: ' + m.text()); });
     return page;
