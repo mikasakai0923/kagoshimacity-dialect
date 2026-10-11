@@ -130,7 +130,7 @@ test('項目と歩、進み具合を受け取れる', () => {
   assert.ok(boot.items.length >= 3);
   assert.deepStrictEqual(Object.keys(boot.progress), []);
   assert.ok(boot.settings.instruction.indexOf('自然な方言') >= 0);
-  assert.strictEqual(boot.settings.maxRecordSec, 30);
+  assert.strictEqual(boot.settings.maxRecordSec, 20);
   const total = boot.steps.reduce((n, s) => n + s.count, 0);
   assert.strictEqual(total, boot.items.length);
   const sent = boot.items.find(i => i.type === '例文');
@@ -303,6 +303,115 @@ test('進み具合シートが作られる', () => {
 test('メニューが落ちずに動く', () => {
   w.call('onOpen'); w.call('menuSetup'); w.ui._promptAnswer = '２'; w.call('menuAddParticipants'); w.call('menuRefreshProgress'); w.call('menuOpenAudioFolder');
   assert.ok(w.sheetRows('参加者').some(r => r[0] === 'K902'), '全角の「２」で2人追加されるはず');
+});
+
+console.log('表の形が変わったとき・ごみ箱・そのほか');
+const col = name => w.sheetRows('回答')[0].indexOf(name);
+const lastRow = () => { const r = w.sheetRows('回答'); return r[r.length - 1]; };
+test('送信IDは submissionId という名前でも受けつける', () => {
+  const s = sub({ itemId: 'S005', audio: [] }); s.submissionId = s.sid; delete s.sid;
+  assert.strictEqual(w.post({ action: 'save', token, submission: s }).saved, true);
+  assert.strictEqual(lastRow()[col('送信ID')], s.submissionId);
+  assert.strictEqual(w.post({ action: 'save', token, submission: s }).duplicate, true);
+});
+test('シートの行を使い切っても、ゼロで始まるナンバーや数字だけの回答が文字のまま残る', () => {
+  const sh = w.ss.getSheetByName('回答');
+  sh.maxRows = sh.getLastRow();                       // 行を使い切った状態にする（列の書式は新しい行に引きつがれない想定）
+  const t7 = w.post({ action: 'login', id: '007', password: '012345' }).token;
+  const s = sub({ itemId: 'S001', type: '語彙', answer: '0123', segPrompt: '', segAnswer: '', audio: [] });
+  assert.strictEqual(w.post({ action: 'save', token: t7, submission: s }).saved, true);
+  assert.strictEqual(lastRow()[col('参加者ナンバー')], '007');
+  assert.strictEqual(lastRow()[col('回答（地域の言葉）')], '0123');
+  assert.ok(lastRow()[col('送信日時')] instanceof Date);
+  assert.ok(sh.getMaxRows() > sh.getLastRow(), '行が足されていない');
+  assert.ok(w.post({ action: 'bootstrap', token: t7 }).progress.S001, '進み具合に出てこない');
+});
+test('調査者が「回答」に列を足しても、見出しどおりの列に入り、二重登録も防げる', () => {
+  const sh = w.ss.getSheetByName('回答');
+  sh.rows = sh.rows.map((r, i) => { const c = r.slice(); while (c.length < 2) c.push(''); c.splice(2, 0, i === 0 ? '調査者メモ' : ''); return c; });
+  sh.cellFormat = {}; sh.colFormat = {};              // 書式もずれるので、いったん全部なくす
+  const s = sub({ itemId: 'S002', answer: '00ずれない', note: '=1+1', audio: [] });
+  assert.strictEqual(w.post({ action: 'save', token, submission: s }).saved, true);
+  assert.strictEqual(lastRow()[col('回答（地域の言葉）')], '00ずれない');
+  assert.strictEqual(lastRow()[col('別形・意味・補足')], '=1+1');
+  assert.strictEqual(lastRow()[col('送信ID')], s.sid);
+  assert.strictEqual(lastRow()[col('調査者メモ')], '');
+  assert.strictEqual(w.post({ action: 'save', token, submission: s }).duplicate, true);
+  assert.ok(w.post({ action: 'bootstrap', token }).progress.S002.count >= 4);
+  assert.ok(w.call('refreshProgress') >= 5);
+  assert.strictEqual(w.ss.sheets.reduce((n, x) => n + x.formulas.length, 0), 0);
+});
+test('見出しが書きかえられていたら保存せず、エラーで知らせる', () => {
+  const sh = w.ss.getSheetByName('回答');
+  const i = col('送信ID'); sh.rows[0][i] = 'ID';
+  const n = sh.rows.length;
+  assert.strictEqual(w.post({ action: 'save', token, submission: sub({ audio: [] }) }).error, 'server_error');
+  assert.strictEqual(w.post({ action: 'bootstrap', token }).error, 'server_error');
+  assert.strictEqual(sh.rows.length, n);
+  sh.rows[0][i] = '送信ID';
+  assert.strictEqual(w.post({ action: 'bootstrap', token }).ok, true);
+});
+test('参加者のフォルダをごみ箱に入れたあとは、新しいフォルダに保存される', () => {
+  const root = w.myDrive.children.find(c => c.name.indexOf('方言調査の録音') === 0);
+  const old = root.children.find(c => c.name === 'K001');
+  const before = old.children.length;
+  old.setTrashed(true);
+  const s = sub({ itemId: 'S002' });
+  assert.strictEqual(w.post({ action: 'save', token, submission: s }).audio, 1);
+  assert.strictEqual(old.children.length, before, 'ごみ箱のフォルダに保存してしまった');
+  const fresh = root.children.filter(c => c.name === 'K001' && !c.isTrashed());
+  assert.strictEqual(fresh.length, 1); assert.strictEqual(fresh[0].children.length, 1);
+  // キャッシュが消えたあと（名前で探す道）でも、ごみ箱のフォルダは選ばない
+  for (const k of Object.keys(w.cache)) if (k.indexOf('folder:') === 0) delete w.cache[k];
+  assert.strictEqual(w.post({ action: 'save', token, submission: sub({ itemId: 'S002' }) }).audio, 1);
+  assert.strictEqual(old.children.length, before); assert.strictEqual(fresh[0].children.length, 2);
+});
+test('ごみ箱に入れた録音は、送り直しのときに使い回さない', () => {
+  const root = w.myDrive.children.find(c => c.name.indexOf('方言調査の録音') === 0);
+  const dir = root.children.find(c => c.name === 'K001' && !c.isTrashed());
+  const s = sub({ itemId: 'S004' });
+  w.control.failAppend = 1;
+  assert.strictEqual(w.post({ action: 'save', token, submission: s }).error, 'server_error');   // 録音だけ保存された状態
+  const f = dir.children[dir.children.length - 1];
+  f.setTrashed(true);
+  assert.strictEqual(w.post({ action: 'save', token, submission: s }).saved, true);
+  assert.strictEqual(dir.children.filter(c => c.name === f.name && !c.isTrashed()).length, 1);
+});
+test('録音フォルダごとごみ箱に入っていたら、保存せずエラーで知らせる', () => {
+  const root = w.myDrive.children.find(c => c.name.indexOf('方言調査の録音') === 0);
+  root.setTrashed(true);
+  const n = w.sheetRows('回答').length;
+  assert.strictEqual(w.post({ action: 'save', token, submission: sub() }).error, 'server_error');
+  assert.strictEqual(w.sheetRows('回答').length, n);
+  root.setTrashed(false);
+  assert.strictEqual(w.post({ action: 'save', token, submission: sub() }).saved, true);
+});
+test('ログインの確認がこみあっているときは「busy」で知らせる', () => {
+  w.control.lockBusy = 1;
+  assert.strictEqual(w.post({ action: 'login', id: 'K001', password: people[0][1] }).error, 'busy');
+  assert.strictEqual(w.post({ action: 'login', id: 'K001', password: people[0][1] }).ok, true);
+});
+test('頭文字に記号が入っていても、ナンバーが重ならない', () => {
+  w.ss.getSheetByName('設定').rows.find(r => r[0] === '参加者ナンバーの頭文字')[1] = 'K-';
+  const a = Array.from(w.call('addParticipants', 2)), b = Array.from(w.call('addParticipants', 2));
+  assert.ok(a.concat(b).every(id => /^K\d+$/.test(id)), a.concat(b).join(','));
+  assert.strictEqual(new Set(a.concat(b)).size, 4);
+  const all = w.sheetRows('参加者').slice(1).map(r => r[0]);
+  assert.strictEqual(new Set(all).size, all.length, '同じナンバーができた');
+});
+test('設問IDが「constructor」のような名前でも、ふつうに扱える', () => {
+  w.ss.getSheetByName('項目').appendRow([9, 9, 'constructor', '語彙', '名前', '', '', '', '', true, '', '']);
+  const b = w.post({ action: 'bootstrap', token });
+  assert.ok(b.items.some(i => i.id === 'constructor'));
+  assert.strictEqual(Object.prototype.hasOwnProperty.call(b.progress, 'constructor'), false);
+  assert.strictEqual(w.post({ action: 'save', token, submission: sub({ itemId: 'constructor', audio: [] }) }).saved, true);
+  assert.strictEqual(w.post({ action: 'bootstrap', token }).progress.constructor.count, 1);
+  assert.ok(w.call('refreshProgress') >= 5);
+});
+test('保存のたびに、表への書きこみを確定させている', () => {
+  const n = w.control.flushes;
+  w.post({ action: 'save', token, submission: sub({ audio: [] }) });
+  assert.strictEqual(w.control.flushes, n + 2);
 });
 
 Date.now = realNow;

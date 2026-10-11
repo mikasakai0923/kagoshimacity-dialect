@@ -5,72 +5,88 @@
 
   var DB_NAME = 'ks-kotoba-sanpo', STORE = 'queue';
   var dbPromise = null;
-  var memory = {};          // IndexedDB が使えないとき（プライベートブラウズなど）の代わり
-  var useMemory = false;
+  var memory = {};          // 端末に保存できなかった回答（この画面を開いているあいだだけ覚えている）
 
-  function open() {
+  function open(fresh) {
+    if (fresh) dbPromise = null;
     if (dbPromise) return dbPromise;
-    dbPromise = new Promise(function (resolve) {
+    dbPromise = new Promise(function (resolve, reject) {
       var idb = window.indexedDB;
-      if (!idb) { useMemory = true; resolve(null); return; }
+      if (!idb) { reject(new Error('この端末では保存場所を使えません')); return; }
       var req;
-      try { req = idb.open(DB_NAME, 1); } catch (e) { useMemory = true; resolve(null); return; }
+      try { req = idb.open(DB_NAME, 1); } catch (e) { reject(e); return; }
       req.onupgradeneeded = function () {
         var db = req.result;
         if (!db.objectStoreNames.contains(STORE)) db.createObjectStore(STORE, { keyPath: 'sid' });
       };
-      req.onsuccess = function () { resolve(req.result); };
-      req.onerror = function () { useMemory = true; resolve(null); };
-      req.onblocked = function () { useMemory = true; resolve(null); };
+      req.onsuccess = function () {
+        var db = req.result;
+        // 端末の都合で接続が切れたら、次に使うときに開き直す
+        db.onclose = function () { dbPromise = null; };
+        db.onversionchange = function () { try { db.close(); } catch (e) { /* 何もしない */ } dbPromise = null; };
+        resolve(db);
+      };
+      req.onerror = function () { reject(req.error || new Error('保存場所を開けませんでした')); };
     });
+    dbPromise.then(null, function () { dbPromise = null; });
     return dbPromise;
   }
 
-  function tx(mode, fn) {
-    return open().then(function (db) {
-      if (!db || useMemory) return fn(null);
+  // 1回の読み書き。失敗したら reject する（ここでは「なかったこと」にしない）
+  function run(mode, fn, fresh) {
+    return open(fresh).then(function (db) {
       return new Promise(function (resolve, reject) {
         var t, result;
-        try { t = db.transaction(STORE, mode); } catch (e) { useMemory = true; resolve(fn(null)); return; }
-        var store = t.objectStore(STORE);
-        var req = fn(store);
+        try { t = db.transaction(STORE, mode); } catch (e) { reject(e); return; }
+        var req;
+        try { req = fn(t.objectStore(STORE)); } catch (e2) { reject(e2); return; }
         if (req) req.onsuccess = function () { result = req.result; };
         t.oncomplete = function () { resolve(result); };
         t.onerror = t.onabort = function () { reject(t.error || new Error('端末への保存に失敗しました')); };
       });
     });
   }
+  // 失敗したら、保存場所を開き直してもう一度だけためす（iPhone では、しばらく裏にいたあと接続が切れていることがある）
+  function runWithRetry(mode, fn) {
+    return run(mode, fn, false).then(null, function () { return run(mode, fn, true); });
+  }
 
   KS.db = {
+    // 回答をとっておく。端末に保存できたら {persisted:true}、できずに「覚えているだけ」なら {persisted:false}
     put: function (item) {
-      return tx('readwrite', function (store) {
-        if (!store) { memory[item.sid] = item; return undefined; }
-        return store.put(item);
-      }).catch(function () {
-        // 端末に保存できないときは、この画面を開いているあいだだけ覚えておく
-        useMemory = true; memory[item.sid] = item;
+      return runWithRetry('readwrite', function (store) { return store.put(item); }).then(function () {
+        delete memory[item.sid];
+        return { persisted: true };
+      }, function () {
+        memory[item.sid] = item;
+        return { persisted: false };
       });
     },
     remove: function (sid) {
       delete memory[sid];
-      return tx('readwrite', function (store) { return store ? store.delete(sid) : undefined; }).catch(function () { /* 何もしない */ });
+      return runWithRetry('readwrite', function (store) { return store.delete(sid); }).then(null, function () { /* 何もしない */ });
     },
     all: function () {
-      return tx('readonly', function (store) {
-        return store ? store.getAll() : undefined;
+      return runWithRetry('readonly', function (store) { return store.getAll(); }).then(function (list) {
+        return list || [];
+      }, function () {
+        return [];
       }).then(function (list) {
-        var out = (list || []).slice();
+        var out = list.slice();
         var seen = {};
         out.forEach(function (i) { seen[i.sid] = true; });
-        for (var k in memory) if (!seen[k]) out.push(memory[k]);
+        for (var k in memory) {
+          if (Object.prototype.hasOwnProperty.call(memory, k) && !Object.prototype.hasOwnProperty.call(seen, k)) out.push(memory[k]);
+        }
         out.sort(function (a, b) { return (a.createdAt || 0) - (b.createdAt || 0); });
-        return out;
-      }).catch(function () {
-        var out = [];
-        for (var k in memory) out.push(memory[k]);
         return out;
       });
     },
-    volatile: function () { return useMemory; }
+    // 端末に保存できず「覚えているだけ」になっている回答の数
+    volatileCount: function () {
+      var n = 0;
+      for (var k in memory) if (Object.prototype.hasOwnProperty.call(memory, k)) n++;
+      return n;
+    }
   };
 })();
