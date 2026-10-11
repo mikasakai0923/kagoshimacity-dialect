@@ -4,7 +4,7 @@
 window.KS_CONFIG = {
   // Google 側の保存プログラム（Apps Script のウェブアプリ）のURL。
   // 空（""）のあいだは「お試しモード」になり、回答はどこにも送られません。
-  apiUrl: "",
+  apiUrl: "https://script.google.com/macros/s/AKfycbzJQhN2WAVrhLn09pWQWb9yyMEmer3ASs7u4uJ3pEs6RXRmoMkoqyQd7EUTunqrZWJaLg/exec",
 
   // サイトの名前と、紹介ページのことば
   siteName: "かごしま ことばさんぽ",
