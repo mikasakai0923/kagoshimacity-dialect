@@ -9,12 +9,14 @@
   var QUIET_PEAK = 0.02;    // これより小さい音は「小さすぎる」と知らせる
   var LOUD_PEAK = 0.985;    // これより大きい音は「割れているかも」と知らせる
 
+  var NOISY_SNR_DB = 20;    // 声と、まわりの音の差（dB）がこれより小さいと「まわりの音が大きい」と知らせる（設定シートで変えられる）
+
   var activeCapture = null;   // いま録音中のもの
   var activeWidget = null;    // いま録音中（または準備中）の録音ボタン
   var player = null;          // 再生は1つだけ
   var playerOwner = null;
 
-  KS.rec = { QUIET_PEAK: QUIET_PEAK };
+  KS.rec = { QUIET_PEAK: QUIET_PEAK, NOISY_SNR_DB: NOISY_SNR_DB };
   KS.rec.supported = function () {
     return !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia && (window.AudioContext || window.webkitAudioContext));
   };
@@ -78,6 +80,60 @@
     }
     return buffer;
   }
+
+  /* ---------- 声と、まわりの音の大きさの差を見積もる ----------
+   * 録音を 0.02 秒ずつに区切り、区切りごとの音の大きさをはかって、
+   *   ・いちばん静かなあたり（静かなほうから3番目の区切り）… まわりの音（話していないあいだの音）
+   *   ・大きいほうの区切りの大きさ                           … 声
+   * とみなす。返すのは { noiseDb: まわりの音, speechDb: 声, snrDb: その差 }（dB）。
+   * 差が小さいほど、声がまわりの音にうもれている。
+   * 見積もれるのは、鳴りつづけている音（換気扇・エアコン・車など）。とつぜんの物音や、
+   * ほかの人の話し声（テレビの声をふくむ）は、本人の声と区別できないので、ここでは拾えない。
+   * 「まわりの音」を静かなほうの数区切りだけで決めるのは、話す前後の間がほとんどない録音でも、
+   * 声を「まわりの音」と取りちがえないようにするため（静かな部屋なのに注意が出るのを防ぐ）。
+   */
+  function analyzeNoise(chunks, total, sampleRate) {
+    var frame = Math.max(1, Math.round(sampleRate * 0.02));
+    var all = [];
+    var sum = 0, n = 0;
+    for (var c = 0; c < chunks.length; c++) {
+      var chunk = chunks[c];
+      for (var i = 0; i < chunk.length; i++) {
+        sum += chunk[i] * chunk[i];
+        if (++n === frame) { all.push(sum / frame); sum = 0; n = 0; }
+      }
+    }
+    // 録りはじめ：まったくの無音（マイクが動き出す前）と、そのあとの 0.06 秒は、音が乱れることがあるので使わない
+    var start = 0;
+    while (start < all.length && all[start] < 1e-9) start++;
+    if (all.length - start >= 25) start += 3;
+    var powers = all.slice(start);
+    var len = powers.length;
+    if (len < 15) return null;                   // 0.3 秒より短いと見積もれない
+    powers.sort(function (a, b) { return a - b; });
+    function db(p) { return 10 * Math.log(Math.max(p, 1e-10)) / Math.LN10; }
+    function round1(v) { return Math.round(v * 10) / 10; }
+    var noise = db(powers[Math.min(2, Math.floor(len * 0.1))]);
+    // 声：いちばん大きい2区切りは、ボタンにふれる音などのことがあるので使わず、その次から最大10区切り（0.2秒ぶん）の平均をとる
+    var top = len - 3;
+    var ref = powers[top];
+    var acc = 0, used = 0;
+    for (var k = top; k >= 0 && used < 10; k--) {
+      if (powers[k] < ref * 0.01) break;         // 3番目より 20dB 以上小さい区切りは、声の中心ではない
+      acc += powers[k]; used++;
+    }
+    var speech = db(acc / used);
+    var out = { noiseDb: round1(noise), speechDb: round1(speech) };
+    if (speech > -70) out.snrDb = round1(speech - noise);     // ほとんど音のない録音では、差は出さない
+    return out;
+  }
+  KS.rec.analyzeNoise = analyzeNoise;
+
+  // その録音は、まわりの音が大きいか。threshold は目安の dB（0 なら、いつも「いいえ」）。指定がなければ、ふだんの目安を使う
+  KS.rec.isNoisy = function (value, threshold) {
+    var t = (typeof threshold === 'number' && isFinite(threshold)) ? threshold : NOISY_SNR_DB;
+    return !!(value && t > 0 && typeof value.snrDb === 'number' && value.snrDb < t);
+  };
 
   /* ---------- マイクから音を受け取る ---------- */
   // かならずボタンを押した処理の中から呼ぶこと（iPhone では、そうしないと音の処理が動き出さない）
@@ -183,11 +239,14 @@
         flushDone = null; tailDone = null;
         var rate = ctx.sampleRate;
         cleanup();
+        var levels = analyzeNoise(chunks, total, rate) || {};
         return {
           buffer: encodeWav(chunks, total, rate),
           sampleRate: rate,
           durationSec: Math.round((total / rate) * 100) / 100,
           peak: Math.round(peak * 10000) / 10000,
+          snrDb: levels.snrDb,            // 声と、まわりの音の差（見積もり）。小さいほど、まわりがうるさい
+          noiseDb: levels.noiseDb,        // まわりの音の大きさ（見積もり）
           echoCancellation: settings.echoCancellation === true,
           noiseSuppression: settings.noiseSuppression === true,
           autoGainControl: settings.autoGainControl === true,
@@ -255,7 +314,7 @@
   }
 
   /* ---------- 録音ボタン（画面の部品） ---------- */
-  // opt: { name: '回答' などの呼び名, maxSec, onchange(value|null), onerror(name) }
+  // opt: { name: '回答' などの呼び名, maxSec, noiseWarnDb（まわりの音の注意を出す目安。0 なら出さない）, onchange(value|null), onerror(name) }
   KS.recorderWidget = function (opt) {
     opt = opt || {};
     var maxSec = opt.maxSec || 20;
@@ -426,7 +485,10 @@
         value = result;
         url = window.URL.createObjectURL(new Blob([result.buffer], { type: 'audio/wav' }));
         setState('done');
+        // 知らせは1つだけ出す。声が小さい → まわりがうるさい → 音が割れている の順に確かめる
+        // （「割れている」は、ボタンにふれる音でもそう見えることがあるので、あとにする）
         if (result.peak < QUIET_PEAK) setNote('音がとても小さいようです。口を近づけて、録り直してみてください。', 'warn');
+        else if (KS.rec.isNoisy(result, opt.noiseWarnDb)) setNote('まわりの音が大きいようです。静かな場所で、口を近づけて、録り直してみてください。', 'warn');
         else if (result.peak >= LOUD_PEAK) setNote('音が大きすぎて、割れているかもしれません。気になるときは、少しはなれて録り直してください。', 'warn');
         else if (auto) setNote(maxSec + '秒たったので、録音を終えました。', 'info');
         else setNote('');

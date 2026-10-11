@@ -100,14 +100,15 @@
         var main = null, ex = null;
         audio.forEach(function (a) { if (a.slot === 'example') ex = ex || a; else main = main || a; });
         var info = { app: s.app };
-        if (main) info.main = { sec: main.durationSec, hz: main.sampleRate, peak: main.peak };
-        if (ex) info.ex = { sec: ex.durationSec, hz: ex.sampleRate, peak: ex.peak };
+        if (main) info.main = { sec: main.durationSec, hz: main.sampleRate, peak: main.peak, snr: main.snrDb, noise: main.noiseDb };
+        if (ex) info.ex = { sec: ex.durationSec, hz: ex.sampleRate, peak: ex.peak, snr: ex.snrDb, noise: ex.noiseDb };
         rows.push({
           at: new Date().toISOString(), participant: s.participant, step: s.step, itemId: s.itemId, type: s.type, prompt: s.prompt,
           status: s.status, answer: s.answer, segPrompt: s.segPrompt, segAnswer: s.segAnswer, exampleAnswer: s.exampleAnswer, note: s.note,
           audio1: main ? '（お試しモードでは保存しません）' : '', link1: '', audio2: ex ? '（お試しモードでは保存しません）' : '', link2: '',
           noAudioReason: s.noAudioReason, durationSec: main ? main.durationSec : '', sampleRate: main ? main.sampleRate : '',
-          elapsedSec: s.elapsedSec, device: s.device, clientTime: s.clientTime, sid: s.submissionId, info: JSON.stringify(info)
+          elapsedSec: s.elapsedSec, device: s.device, clientTime: s.clientTime, sid: s.submissionId, info: JSON.stringify(info),
+          snr: (main && typeof main.snrDb === 'number') ? main.snrDb : ''
         });
         KS.store.set('demo:answers', rows.slice(-500));
         var p = KS.store.get('demo:progress', {});
@@ -126,10 +127,10 @@
   KS.demoCsv = function () {
     var head = ['送信日時', '参加者ナンバー', '歩', '設問ID', '種別', '提示語・例文', '回答の状態', '回答（地域の言葉）', '文節（提示）', '文節（回答）',
       '提案例文の回答', '別形・意味・補足', '録音1', '録音1リンク', '録音2', '録音2リンク', '録音なしの理由', '録音の長さ（秒）', 'サンプリング周波数',
-      '回答にかかった秒数', '端末', '端末での回答日時', '送信ID', '技術情報'];
+      '回答にかかった秒数', '端末', '端末での回答日時', '送信ID', '技術情報', '声と雑音の差（dB）'];
     var keys = ['at', 'participant', 'step', 'itemId', 'type', 'prompt', 'status', 'answer', 'segPrompt', 'segAnswer',
       'exampleAnswer', 'note', 'audio1', 'link1', 'audio2', 'link2', 'noAudioReason', 'durationSec', 'sampleRate',
-      'elapsedSec', 'device', 'clientTime', 'sid', 'info'];
+      'elapsedSec', 'device', 'clientTime', 'sid', 'info', 'snr'];
     function cell(v) {
       var s = String(v == null ? '' : v);
       if (/^[=+\-@]/.test(s)) s = "'" + s;

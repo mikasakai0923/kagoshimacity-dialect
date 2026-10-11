@@ -9,7 +9,8 @@
       wordQuestion: '「{語}」のことをなんといいますか？',
       sentenceQuestion: '「{文}」をなんといいますか？',
       notice: '',
-      maxRecordSec: 20
+      maxRecordSec: 20,
+      noiseWarnDb: 20
     },
     steps: [
       { no: 1, title: '鹿児島中央駅', icon: 'station', count: 3 },
