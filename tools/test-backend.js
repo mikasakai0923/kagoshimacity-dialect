@@ -42,7 +42,8 @@ test('setup がシートと録音フォルダを作る', () => {
   for (const n of ['設定', '参加者', '歩', '項目', '回答']) assert.ok(w.ss.getSheetByName(n), n + ' シートがない');
   assert.strictEqual(w.ss.getSheetByName('シート1'), null, '空のシート1が残っている');
   assert.ok(w.props.SPREADSHEET_ID && w.props.TOKEN_SECRET && w.props.AUDIO_FOLDER_ID);
-  assert.strictEqual(w.sheetRows('回答')[0].length, 24);
+  assert.strictEqual(w.sheetRows('回答')[0].length, 25);
+  assert.strictEqual(w.sheetRows('回答')[0][24], '声と雑音の差（dB）');
   assert.ok(w.sheetRows('項目').length >= 3);
   assert.ok(w.sheetRows('設定').some(r => r[0] === '録音フォルダ' && /^https:/.test(r[1])));
 });
@@ -131,6 +132,7 @@ test('項目と歩、進み具合を受け取れる', () => {
   assert.deepStrictEqual(Object.keys(boot.progress), []);
   assert.ok(boot.settings.instruction.indexOf('自然な方言') >= 0);
   assert.strictEqual(boot.settings.maxRecordSec, 20);
+  assert.strictEqual(boot.settings.noiseWarnDb, 20);
   const total = boot.steps.reduce((n, s) => n + s.count, 0);
   assert.strictEqual(total, boot.items.length);
   const sent = boot.items.find(i => i.type === '例文');
@@ -407,6 +409,84 @@ test('設問IDが「constructor」のような名前でも、ふつうに扱え�
   assert.strictEqual(w.post({ action: 'save', token, submission: sub({ itemId: 'constructor', audio: [] }) }).saved, true);
   assert.strictEqual(w.post({ action: 'bootstrap', token }).progress.constructor.count, 1);
   assert.ok(w.call('refreshProgress') >= 5);
+});
+
+console.log('まわりの音（雑音）の見積もり');
+test('声と雑音の差が、決まった列と技術情報に残る。数値のない回答・おかしな値は空欄になる', () => {
+  const a = over => Object.assign({ slot: 'main', b64: wav(1.2), sampleRate: 48000, durationSec: 1.2, peak: 0.3 }, over || {});
+  const s1 = sub({ audio: [a({ snrDb: 17.34, noiseDb: -41.26 })] });
+  assert.strictEqual(w.post({ action: 'save', token, submission: s1 }).saved, true);
+  assert.strictEqual(lastRow()[col('声と雑音の差（dB）')], 17.34);
+  let info = JSON.parse(lastRow()[col('技術情報')]);
+  assert.strictEqual(info.main.snr, 17.34); assert.strictEqual(info.main.noise, -41.26);
+  // 語彙＋提案例文：列には回答の録音の値、例文の録音の値は技術情報に
+  const s2 = sub({ itemId: 'S003', type: '語彙', audio: [a({ snrDb: 31, noiseDb: -60 }), a({ slot: 'example', snrDb: 8.2, noiseDb: -30.5 })] });
+  assert.strictEqual(w.post({ action: 'save', token, submission: s2 }).audio, 2);
+  assert.strictEqual(lastRow()[col('声と雑音の差（dB）')], 31);
+  info = JSON.parse(lastRow()[col('技術情報')]);
+  assert.strictEqual(info.ex.snr, 8.2); assert.strictEqual(info.ex.noise, -30.5);
+  // 前の版の画面からの回答（数値なし）
+  assert.strictEqual(w.post({ action: 'save', token, submission: sub({ audio: [a()] }) }).saved, true);
+  assert.strictEqual(lastRow()[col('声と雑音の差（dB）')], '');
+  assert.strictEqual('snr' in JSON.parse(lastRow()[col('技術情報')]).main, false);
+  // 録音のない回答・おかしな値
+  w.post({ action: 'save', token, submission: sub({ status: '知らない', audio: [] }) });
+  assert.strictEqual(lastRow()[col('声と雑音の差（dB）')], '');
+  w.post({ action: 'save', token, submission: sub({ audio: [a({ snrDb: '=1+1', noiseDb: null })] }) });
+  assert.strictEqual(lastRow()[col('声と雑音の差（dB）')], '');
+  assert.strictEqual(w.ss.sheets.reduce((n, x) => n + x.formulas.length, 0), 0);
+});
+test('「雑音の注意の目安」：ふだんは20。0 は「出さない」。空欄・読めない値は20、範囲の外は丸める', () => {
+  const st = w.ss.getSheetByName('設定');
+  const i = st.rows.findIndex(r => r[0] === '雑音の注意の目安（dB）');
+  assert.ok(i > 0, '設定の項目がない');
+  const get = v => { st.rows[i][1] = v; const b = w.post({ action: 'bootstrap', token }); assert.strictEqual(b.ok, true); return b.settings.noiseWarnDb; };
+  assert.strictEqual(get(20), 20); assert.strictEqual(get(25), 25); assert.strictEqual(get('２５'), 25);
+  assert.strictEqual(get(0), 0); assert.strictEqual(get('0'), 0); assert.strictEqual(get(-3), 0);
+  assert.strictEqual(get(''), 20); assert.strictEqual(get('なし'), 20);
+  assert.strictEqual(get(100), 40); assert.strictEqual(get(2), 5);
+  const kept = st.rows.splice(i, 1)[0];               // 行ごとなくても、ふだんの目安になる
+  assert.strictEqual(w.post({ action: 'bootstrap', token }).settings.noiseWarnDb, 20);
+  kept[1] = 20; st.rows.splice(i, 0, kept);
+});
+test('前の版で作った表でも保存できる。setup をもう一度実行すると、足りない列と設定の項目だけが足される', () => {
+  const sh = w.ss.getSheetByName('回答'), st = w.ss.getSheetByName('設定');
+  // 前の版の形にもどす：「声と雑音の差」の列と、設定の項目をなくす
+  const c = col('声と雑音の差（dB）');
+  sh.rows = sh.rows.map(r => { const x = r.slice(); if (x.length > c) x.splice(c, 1); return x; });
+  sh.cellFormat = {}; sh.colFormat = {};
+  st.rows = st.rows.filter(r => r[0] !== '雑音の注意の目安（dB）');
+  assert.strictEqual(col('声と雑音の差（dB）'), -1);
+  const a = { slot: 'main', b64: wav(1), sampleRate: 48000, durationSec: 1, peak: 0.3, snrDb: 12.5, noiseDb: -38 };
+  assert.strictEqual(w.post({ action: 'save', token, submission: sub({ audio: [a] }) }).saved, true);
+  assert.strictEqual(JSON.parse(lastRow()[col('技術情報')]).main.snr, 12.5, '列がなくても、技術情報には残る');
+  assert.strictEqual(w.post({ action: 'bootstrap', token }).settings.noiseWarnDb, 20);
+  const before = w.sheetRows('回答'), settingsBefore = w.sheetRows('設定');
+  const msg = w.call('setup');
+  assert.ok(/声と雑音の差（dB）/.test(msg) && /雑音の注意の目安（dB）/.test(msg), msg);
+  const after = w.sheetRows('回答');
+  assert.strictEqual(after[0][after[0].length - 1], '声と雑音の差（dB）', '新しい列は右はしに足される');
+  assert.strictEqual(after[0].length, before[0].length + 1);
+  for (let r = 0; r < before.length; r++) assert.deepStrictEqual(after[r].slice(0, before[r].length), before[r], (r + 1) + '行目が変わった');
+  const settingsAfter = w.sheetRows('設定');
+  assert.strictEqual(settingsAfter.length, settingsBefore.length + 1);
+  assert.deepStrictEqual(settingsAfter.slice(0, settingsBefore.length), settingsBefore, '前からある設定が変わった');
+  assert.strictEqual(settingsAfter[settingsAfter.length - 1][1], 20);
+  assert.strictEqual(w.post({ action: 'save', token, submission: sub({ audio: [a] }) }).saved, true);
+  assert.strictEqual(lastRow()[col('声と雑音の差（dB）')], 12.5);
+  assert.ok(/すでに設定ずみ/.test(w.call('setup')), 'もう一度実行しても、何も足されない');
+});
+test('列を使い切った表でも、足りない列を足せる', () => {
+  const sh = w.ss.getSheetByName('回答');
+  const c = col('声と雑音の差（dB）');
+  sh.rows = sh.rows.map(r => { const x = r.slice(); if (x.length > c) x.splice(c, 1); return x; });
+  sh.rows[0] = sh.rows[0].slice(); while (sh.rows[0].length < sh.getMaxColumns()) sh.rows[0].push('調査者の列' + sh.rows[0].length);
+  assert.strictEqual(sh.getLastColumn(), sh.getMaxColumns());
+  w.call('setup');
+  assert.strictEqual(col('声と雑音の差（dB）'), sh.getMaxColumns() - 1);
+  const a = { slot: 'main', b64: wav(1), sampleRate: 48000, durationSec: 1, peak: 0.3, snrDb: 22.2, noiseDb: -50 };
+  assert.strictEqual(w.post({ action: 'save', token, submission: sub({ audio: [a] }) }).saved, true);
+  assert.strictEqual(lastRow()[col('声と雑音の差（dB）')], 22.2);
 });
 test('保存のたびに、表への書きこみを確定させている', () => {
   const n = w.control.flushes;

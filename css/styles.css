@@ -127,6 +127,7 @@ h1:focus, h1:focus-visible { outline: none; }
   box-shadow: 0 5px 0 var(--ash-deep); cursor: default;
 }
 .btn-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.btn-row .btn { padding-left: 10px; padding-right: 10px; }      /* 2つ並べるボタンは、文字が途中で折れないように左右をつめる */
 .btn-col { display: grid; gap: 16px; width: 100%; }
 
 .linkbtn {
@@ -221,6 +222,8 @@ h1:focus, h1:focus-visible { outline: none; }
 }
 .notice--warn { background: var(--mikan-pale); }
 .notice--bad { background: var(--rec-pale); border-color: #B4232A; }
+.notice--quiet { margin: 0 0 14px; background: var(--bay-pale); font-size: 16px; }
+.notice--quiet .notice__icon { margin-top: 2px; color: var(--bay-deep); }
 .notice__icon { flex: none; margin: 1px 10px 0 0; }
 .notice strong { display: block; }
 
@@ -433,6 +436,7 @@ h1:focus, h1:focus-visible { outline: none; }
 /* ---------- れんしゅう ---------- */
 .practice__after { margin-top: 14px; }
 .card--ok { background: var(--leaf-pale); }
+.practice__check--noisy { background: var(--sun-pale); }
 .practice__q { display: flex; align-items: center; margin-bottom: 8px; font-weight: 700; font-size: 19px; line-height: 1.5; }
 .practice__mark {
   flex: none; display: grid; place-items: center; width: 34px; height: 34px; margin-right: 10px;

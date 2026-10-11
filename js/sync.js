@@ -48,7 +48,7 @@
         return {
           slot: a.slot, b64: b64, sampleRate: a.sampleRate, durationSec: a.durationSec, peak: a.peak,
           echoCancellation: a.echoCancellation, noiseSuppression: a.noiseSuppression, autoGainControl: a.autoGainControl,
-          trackHz: a.trackHz, input: a.input
+          trackHz: a.trackHz, input: a.input, snrDb: a.snrDb, noiseDb: a.noiseDb
         };
       });
     })).then(function (list) { out.audio = list; return out; });

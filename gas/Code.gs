@@ -12,13 +12,14 @@
  * 「拡張機能 → Apps Script」に貼り付けて使います。
  */
 
-var KS_VERSION = '0.2.0';
+var KS_VERSION = '0.3.0';
 var KS_TZ = 'Asia/Tokyo';
 var KS_TOKEN_DAYS = 30;            // ログインの有効日数
 var KS_LOGIN_MAX_FAILS = 8;        // この回数まちがえると、しばらくログインできなくなる
 var KS_LOGIN_LOCK_SEC = 900;       // ログインできなくなる時間（秒）
 var KS_MAX_AUDIO_B64 = 9000000;    // 録音1本の上限（Base64の文字数。約6.7MB）
 var KS_MAX_TEXT = 600;             // 文字の回答1欄の上限
+var KS_NOISE_WARN_DB = 20;         // 「まわりの音が大きい」と注意を出す目安（設定シートで変えられる）
 
 var KS_SHEETS = {
   settings: '設定',
@@ -38,7 +39,8 @@ var KS_HEADERS = {
   answers: ['送信日時', '参加者ナンバー', '歩', '設問ID', '種別', '提示語・例文', '回答の状態',
             '回答（地域の言葉）', '文節（提示）', '文節（回答）', '提案例文の回答', '別形・意味・補足',
             '録音1', '録音1リンク', '録音2', '録音2リンク', '録音なしの理由', '録音の長さ（秒）',
-            'サンプリング周波数', '回答にかかった秒数', '端末', '端末での回答日時', '送信ID', '技術情報'],
+            'サンプリング周波数', '回答にかかった秒数', '端末', '端末での回答日時', '送信ID', '技術情報',
+            '声と雑音の差（dB）'],
   progress: ['参加者ナンバー', '回答した設問', '全設問', '録音なしの回答', '知らない・使わない・思い出せない',
              '最初の回答', '最後の回答']
 };
@@ -51,6 +53,8 @@ var KS_DEFAULT_SETTINGS = [
   ['語彙の質問文', '「{語}」のことをなんといいますか？', '{語} のところに提示語が入ります。'],
   ['例文の質問文', '「{文}」をなんといいますか？', '{文} のところに例文が入ります。'],
   ['録音の上限（秒）', 20, '1回の録音の長さの上限です（5〜60）。長くすると、通信の弱い場所では送信に時間がかかります。'],
+  ['雑音の注意の目安（dB）', KS_NOISE_WARN_DB,
+   '声と、まわりの音の大きさの差（「回答」シートの「声と雑音の差（dB）」）が、この数字より小さい録音に「まわりの音が大きいようです」と注意を出します（5〜40）。数字を大きくすると、きびしくなります。0 にすると注意を出しません。'],
   ['参加者ナンバーの頭文字', 'K', 'メニュー「参加者を追加」で自動的に作るナンバーの頭文字です。']
 ];
 
@@ -98,6 +102,8 @@ function setup() {
   var sh = ksEnsureSheet_(ss, KS_SHEETS.settings, KS_HEADERS.settings, made);
   if (sh.getLastRow() < 2) {
     sh.getRange(2, 1, KS_DEFAULT_SETTINGS.length, 3).setValues(KS_DEFAULT_SETTINGS);
+  } else {
+    ksAddMissingSettings_(sh, made);      // プログラムを新しくして、設定の項目が増えたとき
   }
   sh.setColumnWidth(1, 180); sh.setColumnWidth(2, 420); sh.setColumnWidth(3, 420);
   sh.getRange('B:B').setWrap(true);
@@ -128,6 +134,7 @@ function setup() {
 
   // 回答
   sh = ksEnsureSheet_(ss, KS_SHEETS.answers, KS_HEADERS.answers, made);
+  ksAddMissingHeaders_(sh, KS_HEADERS.answers, made);      // プログラムを新しくして、列が増えたとき
   sh.getRange('A:A').setNumberFormat('yyyy-mm-dd hh:mm:ss');
   // 回答の文字が数字や数式として扱われないように、文字の列は「書式なしテキスト」にする（リンクの列 N・P は除く）
   sh.getRange('B:B').setNumberFormat('@');
@@ -184,6 +191,34 @@ function ksEnsureSheet_(ss, name, headers, made) {
   sh.getRange(1, 1, 1, headers.length).setFontWeight('bold').setBackground('#E6F5F9');
   sh.setFrozenRows(1);
   return sh;
+}
+
+/** すでにあるシートの見出し（1行目）に、足りない見出しを右はしに足します。あるデータは動かしません。 */
+function ksAddMissingHeaders_(sh, headers, made) {
+  var lastCol = sh.getLastColumn();
+  var head = lastCol > 0 ? sh.getRange(1, 1, 1, lastCol).getValues()[0] : [];
+  var have = {};
+  for (var i = 0; i < head.length; i++) have[String(head[i]).trim()] = true;
+  var missing = [];
+  for (var j = 0; j < headers.length; j++) if (!have[headers[j]]) missing.push(headers[j]);
+  if (!missing.length) return;
+  if (lastCol + missing.length > sh.getMaxColumns()) sh.insertColumnsAfter(sh.getMaxColumns(), lastCol + missing.length - sh.getMaxColumns());
+  sh.getRange(1, lastCol + 1, 1, missing.length).setValues([missing]).setFontWeight('bold').setBackground('#E6F5F9');
+  made.push('「' + sh.getName() + '」シートの列「' + missing.join('」「') + '」');
+}
+
+/** すでにある「設定」シートに、足りない項目の行を足します。書いてある値は変えません。 */
+function ksAddMissingSettings_(sh, made) {
+  var last = sh.getLastRow();
+  var keys = last >= 2 ? sh.getRange(2, 1, last - 1, 1).getValues() : [];
+  var have = {};
+  for (var i = 0; i < keys.length; i++) have[String(keys[i][0]).trim()] = true;
+  for (var j = 0; j < KS_DEFAULT_SETTINGS.length; j++) {
+    var row = KS_DEFAULT_SETTINGS[j];
+    if (have[row[0]]) continue;
+    sh.appendRow(row);
+    made.push('「設定」シートの項目「' + row[0] + '」');
+  }
 }
 
 function ksSetSetting_(ss, key, value, note) {
@@ -505,7 +540,8 @@ function ksHandleBootstrap_(req) {
       wordQuestion: String(set['語彙の質問文'] || '「{語}」のことをなんといいますか？'),
       sentenceQuestion: String(set['例文の質問文'] || '「{文}」をなんといいますか？'),
       notice: String(set['お知らせ'] || ''),
-      maxRecordSec: maxSec
+      maxRecordSec: maxSec,
+      noiseWarnDb: ksNoiseWarnDb_(set['雑音の注意の目安（dB）'])
     },
     steps: ksReadSteps_(items),
     items: items,
@@ -513,6 +549,15 @@ function ksHandleBootstrap_(req) {
     serverTime: Date.now(),
     version: KS_VERSION
   });
+}
+
+/** 「雑音の注意の目安（dB）」の値を読みます。0 は「注意を出さない」。空欄や読めない値は、ふだんの目安にします。 */
+function ksNoiseWarnDb_(v) {
+  if (v === '' || v == null) return KS_NOISE_WARN_DB;
+  var n = Number(ksNorm_(v));
+  if (isNaN(n)) return KS_NOISE_WARN_DB;
+  if (n <= 0) return 0;
+  return Math.min(40, Math.max(5, n));
 }
 
 function ksReadItems_() {
@@ -714,6 +759,9 @@ function ksHandleSave_(req) {
       };
       if (a.trackHz) info[tag].trackHz = ksNum_(a.trackHz);
       if (a.input) info[tag].input = ksText_(a.input, 20);
+      // 声と、まわりの音の差（参加者の端末で見積もった値）。小さいほど、まわりの音が大きい
+      if (ksNum_(a.snrDb) !== '') info[tag].snr = ksNum_(a.snrDb);
+      if (ksNum_(a.noiseDb) !== '') info[tag].noise = ksNum_(a.noiseDb);
     }
   }
 
@@ -742,7 +790,8 @@ function ksHandleSave_(req) {
     '端末': ksText_(s.device, 200),
     '端末での回答日時': ksText_(s.clientTime, 40),
     '送信ID': sid,
-    '技術情報': JSON.stringify(info)
+    '技術情報': JSON.stringify(info),
+    '声と雑音の差（dB）': main.snr === '' || main.snr == null ? '' : main.snr
   };
 
   var lock = LockService.getScriptLock();

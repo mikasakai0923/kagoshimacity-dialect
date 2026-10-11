@@ -51,6 +51,7 @@
 node tools/serve.js          # 手元でサイトを開く（http://localhost:8765/ お試しモード）
 node tools/mock-gas.js       # Google 側の「まね」サーバー（http://localhost:8766/exec）
 node tools/test-backend.js   # Google 側プログラムのテスト
+node tools/test-recorder.js  # 録音の「声と雑音の差」の見積もりのテスト
 node tools/e2e.js            # ブラウザを動かして最初から最後まで確かめるテスト（Playwright が必要）
 ```
 
@@ -58,7 +59,7 @@ node tools/e2e.js            # ブラウザを動かして最初から最後ま�
 Google の実物と完全に同じではなく、テストに使うブラウザもパソコン用の Chromium だけです。
 公開前には、Google の実物と、実物のスマートフォン（iPhone・Android）での確認が必要です（[docs/setup-google.md](docs/setup-google.md) の手順7）。
 
-JavaScript や CSS を直したときは、`index.html` の `?v=2` の数字を増やしてください（古いファイルが読まれ続けるのを防ぎます）。
+JavaScript や CSS を直したときは、`index.html` の `?v=3` の数字を増やしてください（古いファイルが読まれ続けるのを防ぎます）。
 
 ## 使わせていただいているもの
 

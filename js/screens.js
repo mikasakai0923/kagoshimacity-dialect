@@ -524,6 +524,7 @@
 
   S.practice = function () {
     var app = KS.app;
+    var set = (KS.state.survey && KS.state.survey.settings) || {};
     var rec = null;
     var after = h('div', { class: 'practice__after' });
     var recWrap = h('div', {});
@@ -532,7 +533,7 @@
     function makeRec() {
       if (rec) rec.destroy();
       rec = KS.recorderWidget({
-        name: 'れんしゅう', maxSec: 15,
+        name: 'れんしゅう', maxSec: 15, noiseWarnDb: set.noiseWarnDb,
         onchange: drawAfter,
         onerror: function () { helpBtn.classList.add('linkbtn--strong'); drawAfter(); }
       });
@@ -549,7 +550,16 @@
       after.innerHTML = '';
       var v = rec && rec.getValue();
       if (!v) return;
-      if (v.peak >= KS.rec.QUIET_PEAK) {
+      if (v.peak >= KS.rec.QUIET_PEAK && KS.rec.isNoisy(v, set.noiseWarnDb)) {
+        // 声は入っているが、まわりの音が大きい。問題に入る前に、静かな場所に移ってもらう
+        after.appendChild(h('div', { class: 'card practice__check practice__check--noisy' },
+          h('p', { class: 'practice__q' }, h('span', { text: 'まわりの音が大きいようです。' })),
+          h('p', { class: 'practice__note', text: 'テレビや音楽、換気扇などを止めるか、静かな場所に移ってから、もう一度録音してみてください。' }),
+          h('p', { class: 'practice__note', text: '静かにできないときは、マイクに口を近づけて話してください。' }),
+          h('div', { class: 'btn-row' },
+            h('button', { type: 'button', class: 'btn btn--plain', onclick: finish }, 'このまま進む'),
+            h('button', { type: 'button', class: 'btn btn--primary', onclick: retry }, '録り直す'))));
+      } else if (v.peak >= KS.rec.QUIET_PEAK) {
         after.appendChild(h('div', { class: 'card card--ok practice__check' },
           h('p', { class: 'practice__q' }, h('span', { class: 'practice__mark', svg: KS.icons.check }), h('span', { text: '声は録音できています。' })),
           h('p', { class: 'practice__note', text: '「聞く」を押すと、録音した声を聞けます。聞こえる音が小さくても、録音はできているので、そのまま進めます。' }),
@@ -591,6 +601,9 @@
       say('listen', [
         h('p', { text: '問題に入る前に、録音をためしてみましょう。' }),
         h('p', { text: '下のボタンを押して「こんにちは」と言い、言いおわったら、もう一度ボタンを押してください。' })]),
+      h('p', { class: 'notice notice--quiet' },
+        h('span', { class: 'notice__icon', svg: KS.icons.ear }),
+        h('span', {}, h('strong', { text: '静かな場所で録音してください' }), 'テレビや音楽、換気扇などは、止めておいてください。')),
       h('div', { class: 'card' },
         h('p', { class: 'label', text: '録音（ボタンを押して、発音して、終わったらまたボタンを押してください）' }),
         recWrap),
@@ -758,7 +771,7 @@
           return null;
         }
         var r = KS.recorderWidget({
-          name: name, maxSec: set.maxRecordSec || 20,
+          name: name, maxSec: set.maxRecordSec || 20, noiseWarnDb: set.noiseWarnDb,
           onchange: function () { r.markMissing(false); clearError(); },
           onerror: function () { showMicHelp(); }
         });
@@ -981,7 +994,7 @@
             }
             out.audio.push({ slot: recs[i].slot, buffer: v.buffer, sampleRate: v.sampleRate, durationSec: v.durationSec, peak: v.peak,
               echoCancellation: v.echoCancellation, noiseSuppression: v.noiseSuppression, autoGainControl: v.autoGainControl,
-              trackHz: v.trackHz, input: v.input });
+              trackHz: v.trackHz, input: v.input, snrDb: v.snrDb, noiseDb: v.noiseDb });
           }
         } else {
           out.noAudioReason = 'マイクが使えない';

@@ -62,10 +62,12 @@ function createGasWorld(codePath) {
   }
 
   class Sheet {
-    constructor(name) { this.name = name; this.rows = []; this.colFormat = {}; this.cellFormat = {}; this.formulas = []; this.maxRows = 1000; }
+    constructor(name) { this.name = name; this.rows = []; this.colFormat = {}; this.cellFormat = {}; this.formulas = []; this.maxRows = 1000; this.maxCols = 26; }
     getName() { return this.name; }
     getMaxRows() { return this.maxRows; }
+    getMaxColumns() { return this.maxCols; }
     insertRowsAfter(after, n) { if (after > this.maxRows || after < 1) throw new Error('mock: その行はシートの外です'); this.maxRows += n; return this; }
+    insertColumnsAfter(after, n) { if (after > this.maxCols || after < 1) throw new Error('mock: その列はシートの外です'); this.maxCols += n; return this; }
     _format(r, c) {
       if (this.cellFormat[r + ':' + c]) return this.cellFormat[r + ':' + c];
       const cf = this.colFormat[c];
@@ -74,6 +76,7 @@ function createGasWorld(codePath) {
     _get(r, c) { const row = this.rows[r - 1]; const v = row ? row[c - 1] : ''; return v === undefined ? '' : v; }
     _set(r, c, v) {
       if (r > this.maxRows) throw new Error('mock: シートの行数（' + this.maxRows + '）をこえて書きこもうとしました');
+      if (c > this.maxCols) throw new Error('mock: シートの列数（' + this.maxCols + '）をこえて書きこもうとしました');
       while (this.rows.length < r) this.rows.push([]);
       const row = this.rows[r - 1];
       while (row.length < c) row.push('');
@@ -105,7 +108,7 @@ function createGasWorld(codePath) {
       return new Range(this, a, b, c === undefined ? 1 : c, d === undefined ? 1 : d);
     }
     getDataRange() { return new Range(this, 1, 1, Math.max(this.getLastRow(), 1), Math.max(this.getLastColumn(), 1)); }
-    appendRow(arr) { const r = this.getLastRow() + 1; if (r > this.maxRows) this.maxRows = r; arr.forEach((v, i) => this._set(r, i + 1, v)); return this; }
+    appendRow(arr) { const r = this.getLastRow() + 1; if (r > this.maxRows) this.maxRows = r; if (arr.length > this.maxCols) this.maxCols = arr.length; arr.forEach((v, i) => this._set(r, i + 1, v)); return this; }
     clearContents() { this.rows = []; return this; }
     setFrozenRows() {} setColumnWidth() {}
   }

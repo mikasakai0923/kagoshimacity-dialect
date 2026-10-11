@@ -50,6 +50,25 @@ function makeWav(file, seconds, amp) {
   fs.writeFileSync(file, b);
   return file;
 }
+// 声に似せた「にせの音」：0.22秒の音と0.18秒の切れ目をくり返す。noiseAmp はまわりの雑音の大きさ（0 なら静かな部屋）
+function makeSpeechWav(file, noiseAmp) {
+  const rate = 48000, period = Math.round(rate * 0.4), on = Math.round(rate * 0.22), n = period * 10;
+  const b = Buffer.alloc(44 + n * 2);
+  b.write('RIFF', 0); b.writeUInt32LE(36 + n * 2, 4); b.write('WAVE', 8); b.write('fmt ', 12);
+  b.writeUInt32LE(16, 16); b.writeUInt16LE(1, 20); b.writeUInt16LE(1, 22); b.writeUInt32LE(rate, 24); b.writeUInt32LE(rate * 2, 28);
+  b.writeUInt16LE(2, 32); b.writeUInt16LE(16, 34); b.write('data', 36); b.writeUInt32LE(n * 2, 40);
+  let seed = 7;
+  const rnd = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; };
+  for (let i = 0; i < n; i++) {
+    const k = i % period;
+    const env = k < on ? Math.min(1, k / 480, (on - k) / 960) : 0;
+    const noise = (rnd() + rnd() + rnd() + rnd() - 2) * 1.732 * noiseAmp;          // ほぼ正規分布（大きさ noiseAmp）
+    const v = Math.max(-1, Math.min(1, env * 0.3 * Math.sin(i * 2 * Math.PI * 220 / rate) + noise));
+    b.writeInt16LE(Math.round(v * 32767), 44 + i * 2);
+  }
+  fs.writeFileSync(file, b);
+  return file;
+}
 const PNG_1PX = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==', 'base64');
 
 (async () => {
@@ -630,6 +649,96 @@ const PNG_1PX = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUl
     await until(() => rowsOf(people[6].id).length === 1, '保存');
     assert.strictEqual(rowsOf(people[6].id)[0][16], 'マイクが使えない');
     await q.context().close();
+    test.page = page;
+  });
+
+  console.log('まわりの音（雑音）');
+  const answerCol = name => world.sheetRows('回答')[0].indexOf(name);
+  const setSetting = (key, value) => { const row = world.ss.getSheetByName('設定').rows.find(r => r[0] === key); assert.ok(row, '設定の項目がない: ' + key); row[1] = value; };
+  await test('うるさい場所：れんしゅうで知らせ、問題でも注意が出る。そのまま進めて、数値が表に残る。目安を 0 にすると注意は出ない', async () => {
+    const noisy = makeSpeechWav(path.join(tmp, 'noisy.wav'), 0.067);          // 声と雑音の差が 10dB くらい
+    const b = await chromium.launch({ args: FAKE_MIC.concat('--use-file-for-fake-audio-capture=' + noisy) });
+    const p = await newPage({}, b);
+    test.page = p;
+    const who = people[7];
+    await login(p, who);
+    await p.waitForSelector('.board .tile');
+    await p.click('.tile--here');
+    await p.waitForSelector('.page--practice');
+    assert.ok(/静かな場所で録音してください/.test(await p.locator('.page--practice').innerText()), 'れんしゅうの画面に「静かな場所で」の案内がない');
+    await record(p, 0, 1300);
+    await p.waitForSelector('.practice__check--noisy');
+    assert.ok(/まわりの音が大きいようです/.test(await p.locator('.practice__after').innerText()));
+    assert.ok(/まわりの音が大きいようです/.test(await p.locator('.rec__note').innerText()));
+    assert.strictEqual(await p.locator('.card--ok').count(), 0, '「録音できています」も出ている');
+    await shot(p, 'live-14-practice-noisy');
+    await p.locator('.practice__check--noisy .btn--primary').click();          // 録り直す
+    assert.strictEqual(await recState(p, 0), 'idle');
+    assert.strictEqual(await p.locator('.practice__check').count(), 0);
+    await record(p, 0, 1300);
+    await p.locator('.practice__check--noisy .btn--plain').click();            // このまま進む
+    await p.waitForSelector('.board .tile--here');
+    await openStep(p);
+    await p.waitForSelector('#f-answer');
+    await p.fill('#f-answer', 'びんた');
+    await record(p, 0, 1300);
+    assert.ok(/まわりの音が大きいようです/.test(await p.locator('.rec__note').innerText()));
+    await shot(p, 'live-15-word-noisy');
+    await p.click('text=つぎへ');
+    await p.waitForSelector('.segs');                                           // 注意が出ていても、そのまま進める
+    await until(() => rowsOf(who.id).length === 1, '保存');
+    const r1 = rowsOf(who.id)[0];
+    const snr = r1[answerCol('声と雑音の差（dB）')];
+    assert.ok(typeof snr === 'number' && snr > 3 && snr < 18, '声と雑音の差 ' + snr);
+    const info = JSON.parse(r1[answerCol('技術情報')]);
+    assert.strictEqual(info.main.snr, snr);
+    assert.ok(info.main.noise < -15 && info.main.noise > -35, 'まわりの音 ' + info.main.noise);
+
+    setSetting('雑音の注意の目安（dB）', 0);                                     // 調査者が「注意を出さない」にした
+    await p.goto(`${site}/#/map`); await p.reload();
+    await p.waitForFunction(() => window.KS && KS.state.survey && KS.state.survey.settings.noiseWarnDb === 0, null, { timeout: 15000 });
+    await p.waitForSelector('.board .tile--here');
+    await openStep(p);
+    await p.waitForSelector('.segs');
+    await p.fill('#f-seg-0', 'びんたが'); await p.fill('#f-seg-1', 'いて');
+    await record(p, 0, 1300);
+    assert.strictEqual((await p.locator('.rec__note').innerText()).trim(), '', '目安が 0 なのに注意が出ている');
+    await p.click('text=つぎへ');
+    await until(() => rowsOf(who.id).length === 2, '保存');
+    const snr2 = rowsOf(who.id)[1][answerCol('声と雑音の差（dB）')];
+    assert.ok(typeof snr2 === 'number' && snr2 < 18, '注意を出さなくても、数値は残るはず ' + snr2);
+    setSetting('雑音の注意の目安（dB）', 20);
+    await b.close();
+    test.page = page;
+  });
+  await test('静かな場所：れんしゅうでも問題でも注意は出ず、数値は大きく残る', async () => {
+    const calm = makeSpeechWav(path.join(tmp, 'calm.wav'), 0.0007);            // 声と雑音の差が 50dB くらい
+    const b = await chromium.launch({ args: FAKE_MIC.concat('--use-file-for-fake-audio-capture=' + calm) });
+    const p = await newPage({}, b);
+    test.page = p;
+    world.call('addParticipants', 1);
+    const last = world.sheetRows('参加者').slice(-1)[0], who = { id: last[0], pw: last[1] };
+    await login(p, who);
+    await p.waitForSelector('.board .tile');
+    await p.click('.tile--here');
+    await p.waitForSelector('.page--practice');
+    await record(p, 0, 1300);
+    assert.ok(/声は録音できています/.test(await p.locator('.practice__after').innerText()));
+    assert.strictEqual(await p.locator('.practice__check--noisy').count(), 0);
+    assert.strictEqual((await p.locator('.rec__note').innerText()).trim(), '');
+    await p.getByRole('button', { name: '地図へすすむ' }).click();
+    await p.waitForSelector('.board .tile--here');
+    await openStep(p);
+    await p.waitForSelector('#f-answer');
+    await p.fill('#f-answer', 'びんた');
+    await record(p, 0, 1300);
+    assert.strictEqual((await p.locator('.rec__note').innerText()).trim(), '');
+    await p.click('text=つぎへ');
+    await p.waitForSelector('.segs');
+    await until(() => rowsOf(who.id).length === 1, '保存');
+    const snr = rowsOf(who.id)[0][answerCol('声と雑音の差（dB）')];
+    assert.ok(typeof snr === 'number' && snr > 35, '声と雑音の差 ' + snr);
+    await b.close();
     test.page = page;
   });
 
