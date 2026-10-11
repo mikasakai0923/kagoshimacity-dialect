@@ -103,7 +103,7 @@
         if (main) info.main = { sec: main.durationSec, hz: main.sampleRate, peak: main.peak, snr: main.snrDb, noise: main.noiseDb };
         if (ex) info.ex = { sec: ex.durationSec, hz: ex.sampleRate, peak: ex.peak, snr: ex.snrDb, noise: ex.noiseDb };
         rows.push({
-          at: new Date().toISOString(), participant: s.participant, step: s.step, itemId: s.itemId, type: s.type, prompt: s.prompt,
+          at: KS.jstStamp(), participant: s.participant, step: s.step, itemId: s.itemId, type: s.type, prompt: s.prompt,
           status: s.status, answer: s.answer, segPrompt: s.segPrompt, segAnswer: s.segAnswer, exampleAnswer: s.exampleAnswer, note: s.note,
           audio1: main ? '（お試しモードでは保存しません）' : '', link1: '', audio2: ex ? '（お試しモードでは保存しません）' : '', link2: '',
           noAudioReason: s.noAudioReason, durationSec: main ? main.durationSec : '', sampleRate: main ? main.sampleRate : '',

@@ -50,8 +50,9 @@ function makeWav(file, seconds, amp) {
   fs.writeFileSync(file, b);
   return file;
 }
-// 声に似せた「にせの音」：0.22秒の音と0.18秒の切れ目をくり返す。noiseAmp はまわりの雑音の大きさ（0 なら静かな部屋）
-function makeSpeechWav(file, noiseAmp) {
+// 声に似せた「にせの音」：0.22秒の音と0.18秒の切れ目をくり返す。noiseAmp はまわりの雑音の大きさ、toneAmp は声の大きさ（はじめは 0.3）
+function makeSpeechWav(file, noiseAmp, toneAmp) {
+  if (toneAmp === undefined) toneAmp = 0.3;
   const rate = 48000, period = Math.round(rate * 0.4), on = Math.round(rate * 0.22), n = period * 10;
   const b = Buffer.alloc(44 + n * 2);
   b.write('RIFF', 0); b.writeUInt32LE(36 + n * 2, 4); b.write('WAVE', 8); b.write('fmt ', 12);
@@ -63,7 +64,7 @@ function makeSpeechWav(file, noiseAmp) {
     const k = i % period;
     const env = k < on ? Math.min(1, k / 480, (on - k) / 960) : 0;
     const noise = (rnd() + rnd() + rnd() + rnd() - 2) * 1.732 * noiseAmp;          // ほぼ正規分布（大きさ noiseAmp）
-    const v = Math.max(-1, Math.min(1, env * 0.3 * Math.sin(i * 2 * Math.PI * 220 / rate) + noise));
+    const v = Math.max(-1, Math.min(1, env * toneAmp * Math.sin(i * 2 * Math.PI * 220 / rate) + noise));
     b.writeInt16LE(Math.round(v * 32767), 44 + i * 2);
   }
   fs.writeFileSync(file, b);
@@ -592,7 +593,7 @@ const PNG_1PX = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUl
   console.log('録音の音');
   await test('音が入っていない録音は受けつけない。小さすぎる録音は、録り直しをすすめる', async () => {
     const silent = makeWav(path.join(tmp, 'silent.wav'), 3, 0);
-    const quiet = makeWav(path.join(tmp, 'quiet.wav'), 3, 0.006);
+    const quiet = makeWav(path.join(tmp, 'quiet.wav'), 3, 0.003);
     for (const [file, kind] of [[silent, 'silent'], [quiet, 'quiet']]) {
       const b = await chromium.launch({ args: FAKE_MIC.concat('--use-file-for-fake-audio-capture=' + file) });
       const p = await newPage({}, b);
@@ -742,6 +743,66 @@ const PNG_1PX = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUl
     await until(() => rowsOf(who.id).length === 1, '保存');
     const snr = rowsOf(who.id)[0][answerCol('声と雑音の差（dB）')];
     assert.ok(typeof snr === 'number' && snr > 35, '声と雑音の差 ' + snr);
+    await b.close();
+    test.page = page;
+  });
+
+  await test('音量の小さい端末（iPhone など）：声と雑音の差が十分なら注意は出ない。メーターが動き、「聞く」は大きい音で流れ、保存される録音はもとのまま', async () => {
+    const low = makeSpeechWav(path.join(tmp, 'low.wav'), 0.0001, 0.03);        // 声は最大の3%、まわりはとても静か
+    const b = await chromium.launch({ args: FAKE_MIC.concat('--use-file-for-fake-audio-capture=' + low) });
+    // 「聞く」で流す音を調べられるように、再生の部品を覚えておく
+    const p = await newPage({ init: () => { const A = window.Audio; window.Audio = function () { const a = new A(); window.__lastAudio = a; return a; }; } }, b);
+    test.page = p;
+    world.call('addParticipants', 1);
+    const last = world.sheetRows('参加者').slice(-1)[0], who = { id: last[0], pw: last[1] };
+    await login(p, who);
+    await p.waitForSelector('.board .tile');
+    await p.click('.tile--here');
+    await p.waitForSelector('.page--practice');
+    // れんしゅう：録音中にメーターが3本以上光る
+    const rec = p.locator('.rec').first();
+    await rec.locator('.rec__btn').click();
+    await p.waitForFunction(() => document.querySelector('.rec').getAttribute('data-state') === 'recording', null, { timeout: 10000 });
+    let maxBars = 0;
+    for (let i = 0; i < 25; i++) { maxBars = Math.max(maxBars, await p.locator('.rec__bar--on').count()); await p.waitForTimeout(50); }
+    await rec.locator('.rec__btn').click();
+    await p.waitForFunction(() => document.querySelector('.rec').getAttribute('data-state') === 'done', null, { timeout: 10000 });
+    assert.ok(maxBars >= 3 && maxBars <= 5, 'メーターの光った本数 ' + maxBars);
+    assert.ok(/声は録音できています/.test(await p.locator('.practice__after').innerText()), 'れんしゅう: ' + await p.locator('.practice__after').innerText());
+    assert.strictEqual((await p.locator('.rec__note').innerText()).trim(), '');
+    await shot(p, 'live-16-practice-lowlevel');
+    // 「聞く」：流れる音は、もとの4倍以上
+    await p.click('text=聞く');
+    const played = await p.evaluate(async () => {
+      const buf = await (await fetch(window.__lastAudio.src)).arrayBuffer(); const dv = new DataView(buf); let peak = 0;
+      for (let o = 44; o + 1 < buf.byteLength; o += 2) peak = Math.max(peak, Math.abs(dv.getInt16(o, true)) / 32768);
+      return { peak, bytes: buf.byteLength, head: String.fromCharCode(dv.getUint8(0), dv.getUint8(1), dv.getUint8(2), dv.getUint8(3)) };
+    });
+    assert.strictEqual(played.head, 'RIFF');
+    assert.ok(played.peak > 0.1 && played.peak < 0.25, '再生の音の大きさ ' + played.peak);
+    await p.getByRole('button', { name: '地図へすすむ' }).click();
+    await p.waitForSelector('.board .tile--here');
+    await openStep(p);
+    await p.waitForSelector('#f-answer');
+    await p.fill('#f-answer', 'びんた');
+    await record(p, 0, 1300);
+    assert.strictEqual((await p.locator('.rec__note').innerText()).trim(), '', '音量が小さいだけで注意が出ている');
+    await p.click('text=つぎへ');
+    await p.waitForSelector('.segs');
+    await until(() => rowsOf(who.id).length === 1, '保存');
+    const r = rowsOf(who.id)[0];
+    assert.ok(r[answerCol('声と雑音の差（dB）')] > 35, '声と雑音の差 ' + r[answerCol('声と雑音の差（dB）')]);
+    const info = JSON.parse(r[answerCol('技術情報')]);
+    assert.ok(info.main.peak > 0.02 && info.main.peak < 0.04, '保存された録音の音量 ' + info.main.peak);
+    // 保存された録音そのものは、大きくしていない
+    const f = world.files().find(x => x.path.indexOf('/' + who.id + '/') >= 0);
+    const bytes = world.fileBytes(f.id); let peak = 0;
+    for (let o = 44; o + 1 < bytes.length; o += 2) peak = Math.max(peak, Math.abs(bytes.readInt16LE(o)) / 32768);
+    assert.ok(peak > 0.02 && peak < 0.04, '保存された録音の最大の音量 ' + peak);
+    // 端末での回答日時は、日本時間
+    assert.ok(/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\+09:00$/.test(r[answerCol('端末での回答日時')]), '端末での回答日時 ' + r[answerCol('端末での回答日時')]);
+    const diff = Math.abs(new Date(r[answerCol('端末での回答日時')]).getTime() - Date.now());
+    assert.ok(diff < 5 * 60000, '端末での回答日時が、いまの時刻とずれている');
     await b.close();
     test.page = page;
   });

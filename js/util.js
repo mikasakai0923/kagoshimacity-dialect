@@ -2,7 +2,13 @@
 (function () {
   'use strict';
   var KS = window.KS = window.KS || {};
-  KS.VERSION = '0.3.2';
+  KS.VERSION = '0.3.3';
+
+  // 日時を、日本時間の「2026-10-12T08:41:03+09:00」の形にする（端末の時計がどの国の設定でも、日本時間で書く）
+  KS.jstStamp = function (date) {
+    var t = new Date((date || new Date()).getTime() + 9 * 3600000);
+    return t.toISOString().replace(/\.\d+Z$/, '+09:00');
+  };
 
   /* ---------- 画面の部品を作る ---------- */
 

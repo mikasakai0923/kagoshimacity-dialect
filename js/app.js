@@ -101,7 +101,7 @@
       note: out.note || '',
       noAudioReason: out.noAudioReason || '',
       elapsedSec: out.elapsedSec,
-      clientTime: new Date().toISOString(),
+      clientTime: KS.jstStamp(),
       device: KS.device(),
       app: KS.VERSION,
       audio: out.audio || []
