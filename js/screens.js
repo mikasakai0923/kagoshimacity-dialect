@@ -357,9 +357,9 @@
           var pd = state.practiceDone;
           cls += pd ? ' tile--done' : ' tile--current';
           inner = h('span', { class: 'tile__icon', svg: KS.art.flag(pd ? '#fff' : '#FFD84D') });
-          label = [h('span', { class: 'tile__no', text: 'ふりだし' }), h('span', { class: 'tile__title', text: '録音のれんしゅう' }),
+          label = [h('span', { class: 'tile__no', text: 'スタート' }), h('span', { class: 'tile__title', text: '録音のれんしゅう' }),
                    h('span', { class: 'tile__meta', text: pd ? 'できました' : 'ここから' })];
-          aria = 'ふりだし：録音のれんしゅう。' + (pd ? 'できました' : 'ここから始めます');
+          aria = 'スタート：録音のれんしゅう。' + (pd ? 'できました' : 'ここから始めます');
           onclick = function () { app.go('#/practice'); };
         } else if (n.kind === 'goal') {
           var all = current === 'goal';
@@ -506,7 +506,7 @@
   }
 
   /* ============================================================
-   * ふりだし：録音のれんしゅう
+   * スタート：録音のれんしゅう
    * ============================================================ */
 
   // マイクの許可を、毎回たずねられないようにする方法（iPhone・iPad）
@@ -596,7 +596,7 @@
     var el = h('main', { class: 'page page--practice' },
       h('div', { class: 'topbar' },
         iconButton(KS.icons.close, '地図にもどる', function () { app.replace('#/map'); }),
-        h('span', { class: 'topbar__title', text: 'ふりだし' }), h('span', { class: 'topbar__spacer' })),
+        h('span', { class: 'topbar__title', text: 'スタート' }), h('span', { class: 'topbar__spacer' })),
       h('h1', { class: 'page__title', text: '録音のれんしゅう' }),
       say('listen', [
         h('p', { text: '問題に入る前に、録音をためしてみましょう。' }),

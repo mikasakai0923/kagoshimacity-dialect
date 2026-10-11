@@ -150,7 +150,7 @@
   /* ---------- 歩のマスに押す「済」のしるし ---------- */
   KS.art.stamp = '<svg viewBox="0 0 40 40" aria-hidden="true" focusable="false"><circle cx="20" cy="20" r="16" fill="#fff" stroke="' + INK + '" stroke-width="3.500"/><path d="M12 20.500l5.500 5.500L28.500 14.500" fill="none" stroke="#37B679" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 
-  /* ---------- ふりだしの旗・あがりの旗 ---------- */
+  /* ---------- スタートの旗・あがりの旗 ---------- */
   KS.art.flag = function (fill) {
     return '<svg viewBox="0 0 40 44" aria-hidden="true" focusable="false"><path d="M10 6v34" stroke="' + INK + '" stroke-width="4" stroke-linecap="round"/>' +
       '<path d="M10 7c8-5 12 4 22-1v15c-10 5-14-4-22 1z" fill="' + fill + '" stroke="' + INK + '" stroke-width="3.500" stroke-linejoin="round"/></svg>';
