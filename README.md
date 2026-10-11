@@ -1,0 +1,1 @@
+# kqgoshimacity-dialect
