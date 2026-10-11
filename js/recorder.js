@@ -91,6 +91,9 @@
    * ほかの人の話し声（テレビの声をふくむ）は、本人の声と区別できないので、ここでは拾えない。
    * 「まわりの音」を静かなほうの数区切りだけで決めるのは、話す前後の間がほとんどない録音でも、
    * 声を「まわりの音」と取りちがえないようにするため（静かな部屋なのに注意が出るのを防ぐ）。
+   * まったくの無音（数字の上でゼロ）の区切りは、まわりの音ではなく、音がとぎれたところなので数えない。
+   * そういう区切りが多い録音は、端末が話していないあいだの音を消しているので、まわりの音は見積もらない
+   * （noiseDb と snrDb を返さない）。
    */
   function analyzeNoise(chunks, total, sampleRate) {
     var frame = Math.max(1, Math.round(sampleRate * 0.02));
@@ -103,11 +106,15 @@
         if (++n === frame) { all.push(sum / frame); sum = 0; n = 0; }
       }
     }
+    var ZERO = 1e-9;                             // これより小さい区切りは「まったくの無音」（本物のマイクなら、静かな部屋でもこれより大きい）
     // 録りはじめ：まったくの無音（マイクが動き出す前）と、そのあとの 0.06 秒は、音が乱れることがあるので使わない
     var start = 0;
-    while (start < all.length && all[start] < 1e-9) start++;
+    while (start < all.length && all[start] < ZERO) start++;
     if (all.length - start >= 25) start += 3;
-    var powers = all.slice(start);
+    var powers = [], dropped = 0;
+    for (var j = start; j < all.length; j++) {
+      if (all[j] < ZERO) dropped++; else powers.push(all[j]);
+    }
     var len = powers.length;
     if (len < 15) return null;                   // 0.3 秒より短いと見積もれない
     powers.sort(function (a, b) { return a - b; });
@@ -123,7 +130,9 @@
       acc += powers[k]; used++;
     }
     var speech = db(acc / used);
-    var out = { noiseDb: round1(noise), speechDb: round1(speech) };
+    var out = { speechDb: round1(speech) };
+    if (dropped > (len + dropped) * 0.1) return out;          // 無音の区切りが1割をこえる：まわりの音は見積もれない
+    out.noiseDb = round1(noise);
     if (speech > -70) out.snrDb = round1(speech - noise);     // ほとんど音のない録音では、差は出さない
     return out;
   }

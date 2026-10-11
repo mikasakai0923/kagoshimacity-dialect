@@ -132,6 +132,23 @@ test('終わりのタップ音、はじめのポップ音、はじめの無音�
   }
 });
 
+console.log('音がとぎれたところ（まったくの無音）');
+test('とちゅうに、まったくの無音の区切りが少しあっても、静かな部屋とは見なさない（数字が大きくなりすぎない）', () => {
+  const r = build({ syllables: 5, noise: 'white', noiseDb: -32, selfDb: -80 });
+  const base = analyze(r).snrDb;
+  for (const at of [0.5, 0.9]) { const from = Math.round(at * r.samples.length); for (let i = 0; i < 0.07 * r.rate; i++) r.samples[from + i] = 0; }
+  const e = analyze(r);
+  near(e.snrDb, base, 2);
+  assert.strictEqual(rec.isNoisy(e), true);
+});
+test('話していないあいだが、いつもまったくの無音になる端末では、差を出さない（注意も出さない）', () => {
+  const r = build({ syllables: 6, selfDb: -200, lead: 0.4, trail: 0.5 });      // 機器の雑音がゼロ＝端末が音を消している
+  const e = analyze(r);
+  assert.strictEqual(e.snrDb, undefined); assert.strictEqual(e.noiseDb, undefined);
+  assert.ok(e.speechDb > -30);
+  assert.strictEqual(rec.isNoisy(e), false);
+});
+
 console.log('声がないとき・短すぎるとき');
 test('音のない録音・ほとんど音のない録音では、差を出さない（注意も出さない）', () => {
   assert.strictEqual(analyze({ samples: new Float32Array(48000), rate: 48000 }), null);        // まったくの無音
