@@ -166,7 +166,7 @@ const PNG_1PX = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUl
     await page.click('button[type=submit]');
     await page.waitForSelector('.board .tile');
     assert.ok((await page.locator('.who').innerText()).indexOf(people[0].id) === 0);
-    assert.strictEqual(await page.locator('.tile').count(), 4);       // スタート＋2歩＋あがり
+    assert.strictEqual(await page.locator('.tile').count(), 4);       // スタート＋2歩＋ゴール
     assert.ok(/送信ずみ/.test(await pill(page)));
   });
   await test('ログインのあと「戻る」を押すと、ログイン画面ではなく紹介ページにもどる', async () => {
@@ -365,7 +365,7 @@ const PNG_1PX = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUl
     await untilRows(5);
     const r = rows()[4];
     assert.strictEqual(r[6], '使わない'); assert.strictEqual(r[7], ''); assert.strictEqual(r[12], ''); assert.strictEqual(r[11], 'ねこはおらん');
-    assert.ok(/あがり/.test(await page.locator('.clear__title').innerText()));
+    assert.ok(/ゴール/.test(await page.locator('.clear__title').innerText()));
     await shot(page, 'live-09-goal');
   });
   await test('「もう一度こたえる」と行が増える。「録音なし」はその歩のあいだだけ。回答は書かれたとおりに保存される', async () => {

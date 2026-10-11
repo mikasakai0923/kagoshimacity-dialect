@@ -2,7 +2,7 @@
 (function () {
   'use strict';
   var KS = window.KS = window.KS || {};
-  KS.VERSION = '0.3.1';
+  KS.VERSION = '0.3.2';
 
   /* ---------- 画面の部品を作る ---------- */
 
