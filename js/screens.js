@@ -335,7 +335,7 @@
         var from = nodes[i], doneFrom = from.kind === 'start' ? state.practiceDone : (from.kind === 'step' && from.info.complete);
         if (doneFrom) walked += seg(pts[i], pts[i + 1]);
       }
-      // 海（あがりの手前）
+      // 海（ゴールの手前）
       var seaY = pts[pts.length - 1].y - RH * 0.5;
       boardWrap.appendChild(h('div', {
         class: 'board__road', 'aria-hidden': 'true',
@@ -365,9 +365,9 @@
           var all = current === 'goal';
           cls += all ? ' tile--goal tile--done' : ' tile--goal tile--locked';
           inner = h('img', { class: 'tile__img', src: 'images/icons/volcano.svg', alt: '' });
-          label = [h('span', { class: 'tile__no', text: 'あがり' }), h('span', { class: 'tile__title', text: all ? 'おつかれさまでした' : '桜島' })];
-          aria = 'あがり。' + (all ? 'さいごまで歩きました' : 'まだ進めません');
-          onclick = function () { if (all) app.go('#/done'); else KS.toast('すべての歩を歩きおえると、あがりです。'); };
+          label = [h('span', { class: 'tile__no', text: 'ゴール' }), h('span', { class: 'tile__title', text: all ? 'おつかれさまでした' : '桜島' })];
+          aria = 'ゴール。' + (all ? 'さいごまで歩きました' : 'まだ進めません');
+          onclick = function () { if (all) app.go('#/done'); else KS.toast('すべての歩を歩きおえると、ゴールです。'); };
         } else {
           var info = n.info, s = n.step;
           var locked = !info.unlocked;
@@ -1075,7 +1075,7 @@
   };
 
   /* ============================================================
-   * 歩クリア・あがり
+   * 歩クリア・ゴール
    * ============================================================ */
   S.clear = function (stepNo) {
     var app = KS.app;
@@ -1117,7 +1117,7 @@
       h('div', { class: 'clear' },
         h('div', { class: 'clear__art', svg: KS.art.sakurajima(doneSteps, steps.length || 1, true) }),
         h('div', { class: 'clear__mascot', svg: KS.art.daikon('cheer') }),
-        h('h1', { class: 'clear__title' }, allDone ? 'あがり！' : [h('span', { text: stepNo + '歩目' }), h('span', { text: 'クリア！' })]),
+        h('h1', { class: 'clear__title' }, allDone ? 'ゴール！' : [h('span', { text: stepNo + '歩目' }), h('span', { text: 'クリア！' })]),
         h('p', { class: 'clear__text', text: allDone
           ? 'さいごまで歩きました。ご協力ありがとうございました。'
           : (step && step.title ? step.title + 'まで歩きました。' : '') + info.total + '問こたえました。' }),
@@ -1129,7 +1129,7 @@
       KS.reducedMotion() ? null : h('div', { class: 'confetti', 'aria-hidden': 'true' }, confetti())
     );
     return {
-      el: el, title: allDone ? 'あがり' : stepNo + '歩目クリア',
+      el: el, title: allDone ? 'ゴール' : stepNo + '歩目クリア',
       destroy: function () { pill.destroy(); if (offSync) offSync(); }
     };
   };
