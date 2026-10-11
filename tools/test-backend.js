@@ -488,6 +488,14 @@ test('列を使い切った表でも、足りない列を足せる', () => {
   assert.strictEqual(w.post({ action: 'save', token, submission: sub({ audio: [a] }) }).saved, true);
   assert.strictEqual(lastRow()[col('声と雑音の差（dB）')], 22.2);
 });
+test('端末の日時が日本時間（+09:00）の形で届いても、録音のファイル名に正しい日時がつく', () => {
+  const t = new Date(clock + 9 * 3600000).toISOString();                       // 日本時間に直したもの
+  const stamp = t.slice(0, 10).replace(/-/g, '') + '-' + t.slice(11, 19).replace(/:/g, '');
+  const s = sub({ clientTime: t.replace(/\.\d+Z$/, '+09:00'), audio: [{ slot: 'main', b64: wav(1), sampleRate: 48000, durationSec: 1, peak: 0.03 }] });
+  assert.strictEqual(w.post({ action: 'save', token, submission: s }).saved, true);
+  assert.ok(lastRow()[col('録音1')].indexOf('_' + stamp + '_') > 0, lastRow()[col('録音1')] + ' に ' + stamp + ' がない');
+  assert.strictEqual(lastRow()[col('端末での回答日時')], s.clientTime);
+});
 test('保存のたびに、表への書きこみを確定させている', () => {
   const n = w.control.flushes;
   w.post({ action: 'save', token, submission: sub({ audio: [] }) });

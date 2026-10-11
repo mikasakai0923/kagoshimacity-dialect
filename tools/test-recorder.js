@@ -165,6 +165,41 @@ test('0.3秒より短いと見積もらない', () => {
   assert.ok(analyze(build({ syllables: 1, lead: 0.1, trail: 0.15 })));
 });
 
+console.log('録音中のメーター・再生のときの音量');
+test('メーター：音量の小さい端末（ふつうの声で最大の3%くらい）でも、半分ほど光る。静かなときは光らない', () => {
+  assert.strictEqual(rec.meterBars(0, 7), 0);
+  assert.strictEqual(rec.meterBars(0.0003, 7), 0);       // iPhone の静かな部屋
+  assert.ok(rec.meterBars(0.03, 7) >= 3 && rec.meterBars(0.03, 7) <= 5);
+  assert.ok(rec.meterBars(0.01, 7) >= 1);
+  assert.strictEqual(rec.meterBars(0.3, 7), 7);
+  assert.strictEqual(rec.meterBars(1, 7), 7);
+  let prev = 0;
+  for (const l of [0.001, 0.003, 0.01, 0.03, 0.1, 0.3, 1]) { const n = rec.meterBars(l, 7); assert.ok(n >= prev, '大きい音ほど多く光るはず'); prev = n; }
+});
+test('再生のときの倍率：小さく録れた声は大きくし、十分大きい声は変えない。上げすぎない', () => {
+  near(20 * Math.log10(rec.playbackGain({ speechDb: -45.2, peak: 0.027 })), 25.2, 0.1);
+  assert.strictEqual(rec.playbackGain({ speechDb: -15, peak: 0.5 }), 1);
+  assert.strictEqual(rec.playbackGain({ speechDb: -20, peak: 0.3 }), 1);
+  near(20 * Math.log10(rec.playbackGain({ speechDb: -65, peak: 0.004 })), 36, 0.01);      // 上限
+  near(rec.playbackGain({ peak: 0.02 }), 25, 0.01);                                        // 声の大きさがわからないとき
+  assert.strictEqual(rec.playbackGain({ peak: 0.9 }), 1);
+  assert.strictEqual(rec.playbackGain({}), 1);
+  assert.strictEqual(rec.playbackGain(null), 1);
+});
+test('再生用の写し：音だけが大きくなり、長さや形式は変わらない。もとの録音は変わらない。大きすぎるところは上限でおさえる', () => {
+  const n = 1000, buf = new ArrayBuffer(44 + n * 2), dv = new DataView(buf);
+  for (let i = 0; i < 44; i++) dv.setUint8(i, i + 1);
+  for (let i = 0; i < n; i++) dv.setInt16(44 + i * 2, Math.round(900 * Math.sin(i / 7)), true);
+  dv.setInt16(44 + 10, 30000, true); dv.setInt16(44 + 12, -30000, true);                    // ボタンにふれる音のような、大きい山
+  const before = Buffer.from(buf).toString('hex');
+  const out = rec.amplifyWav(buf, 18), ov = new DataView(out);
+  assert.strictEqual(Buffer.from(buf).toString('hex'), before, 'もとの録音が変わった');
+  assert.strictEqual(out.byteLength, buf.byteLength);
+  for (let i = 0; i < 44; i++) assert.strictEqual(ov.getUint8(i), i + 1, '見出しが変わった');
+  assert.strictEqual(ov.getInt16(44 + 10, true), 32767); assert.strictEqual(ov.getInt16(44 + 12, true), -32768);
+  for (const i of [0, 3, 50, 999]) assert.strictEqual(ov.getInt16(44 + i * 2, true), Math.max(-32768, Math.min(32767, Math.round(dv.getInt16(44 + i * 2, true) * 18))));
+});
+
 console.log('そのほか');
 test('サンプリング周波数や、音の届き方（かたまりの大きさ）がちがっても、同じ結果になる', () => {
   for (const rate of [16000, 24000, 44100, 48000]) {

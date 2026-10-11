@@ -6,7 +6,11 @@
 
   var MIN_SEC = 0.4;        // これより短い録音は「押しまちがい」とみなす
   var SILENT_PEAK = 0.001;  // これより小さい音は「音が入っていない」とみなして、録り直してもらう
-  var QUIET_PEAK = 0.02;    // これより小さい音は「小さすぎる」と知らせる
+  // これより小さい音は「小さすぎる」と知らせる。
+  // 録れる音量は端末によって大きくちがう（iPhone は音量の自動調整が切れるので、ふつうの声でも最大の 3% くらい）。
+  // 音量が小さくても、声と、まわりの音の差が十分あれば録音としては問題ないので、ここでは「ほとんど何も録れていない」
+  // ほど小さいときだけを見て、あとは「声と、まわりの音の差」（analyzeNoise）で判断する。
+  var QUIET_PEAK = 0.005;
   var LOUD_PEAK = 0.985;    // これより大きい音は「割れているかも」と知らせる
 
   var NOISY_SNR_DB = 20;    // 声と、まわりの音の差（dB）がこれより小さいと「まわりの音が大きい」と知らせる（設定シートで変えられる）
@@ -138,6 +142,40 @@
   }
   KS.rec.analyzeNoise = analyzeNoise;
 
+  /* ---------- 録音中のメーター：音の大きさ（0〜1）を、光らせる目盛りの本数にする ----------
+   * 端末によって録れる音量が大きくちがうので、比ではなく dB で数える（−54dB で 0 本、−14dB 以上で全部）。
+   * こうすると、音量の小さい端末（iPhone など）でも、ふつうの声で半分くらい光る。 */
+  function meterBars(level, count) {
+    if (!(level > 0)) return 0;
+    var x = (20 * Math.log(level) / Math.LN10 + 54) / 40;
+    return Math.round(Math.max(0, Math.min(1, x)) * count);
+  }
+  KS.rec.meterBars = meterBars;
+
+  /* ---------- 「聞く」で再生するときだけ、音を大きくする（保存する録音は変えない） ----------
+   * 音量の小さい端末では、そのまま再生すると、ほとんど聞こえないため。 */
+  // どれだけ大きくするか（倍率）。声の大きさが −20dB くらいになるように上げる（最大 36dB＝約63倍）
+  function playbackGain(result) {
+    var db;
+    if (result && typeof result.speechDb === 'number' && result.speechDb > -70) db = -20 - result.speechDb;
+    else if (result && result.peak > 0) db = 20 * Math.log(0.5 / result.peak) / Math.LN10;   // 声の大きさがわからないときは、いちばん大きい音を目安にする
+    else return 1;
+    if (!(db > 0)) return 1;
+    return Math.pow(10, Math.min(36, db) / 20);
+  }
+  // WAV（16ビット）の音を gain 倍にした、別の WAV を作る（大きくなりすぎるところは、上限でおさえる）
+  function amplifyWav(buffer, gain) {
+    var out = buffer.slice(0);
+    var src = new DataView(buffer), dst = new DataView(out);
+    for (var off = 44; off + 1 < buffer.byteLength; off += 2) {
+      var v = Math.round(src.getInt16(off, true) * gain);
+      dst.setInt16(off, v > 32767 ? 32767 : (v < -32768 ? -32768 : v), true);
+    }
+    return out;
+  }
+  KS.rec.playbackGain = playbackGain;
+  KS.rec.amplifyWav = amplifyWav;
+
   // その録音は、まわりの音が大きいか。threshold は目安の dB（0 なら、いつも「いいえ」）。指定がなければ、ふだんの目安を使う
   KS.rec.isNoisy = function (value, threshold) {
     var t = (typeof threshold === 'number' && isFinite(threshold)) ? threshold : NOISY_SNR_DB;
@@ -254,6 +292,7 @@
           sampleRate: rate,
           durationSec: Math.round((total / rate) * 100) / 100,
           peak: Math.round(peak * 10000) / 10000,
+          speechDb: levels.speechDb,      // 声の大きさ（見積もり）。再生のときの音量を決めるのに使う
           snrDb: levels.snrDb,            // 声と、まわりの音の差（見積もり）。小さいほど、まわりがうるさい
           noiseDb: levels.noiseDb,        // まわりの音の大きさ（見積もり）
           echoCancellation: settings.echoCancellation === true,
@@ -392,7 +431,7 @@
 
     function drawLevel() {
       levelRaf = null;
-      var n = Math.round(Math.min(1, Math.sqrt(lastLevel) * 1.6) * bars.length);
+      var n = meterBars(lastLevel, bars.length);
       for (var i = 0; i < bars.length; i++) bars[i].className = 'rec__bar' + (i < n ? ' rec__bar--on' : '');
       lastLevel *= 0.6;
     }
@@ -492,7 +531,9 @@
           return;
         }
         value = result;
-        url = window.URL.createObjectURL(new Blob([result.buffer], { type: 'audio/wav' }));
+        // 「聞く」で流すのは、聞きとりやすい音量にした写し。保存先へ送るのは、もとの録音（result.buffer）のまま
+        var gain = playbackGain(result);
+        url = window.URL.createObjectURL(new Blob([gain > 1.05 ? amplifyWav(result.buffer, gain) : result.buffer], { type: 'audio/wav' }));
         setState('done');
         // 知らせは1つだけ出す。声が小さい → まわりがうるさい → 音が割れている の順に確かめる
         // （「割れている」は、ボタンにふれる音でもそう見えることがあるので、あとにする）
