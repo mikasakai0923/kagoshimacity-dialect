@@ -166,7 +166,7 @@ const PNG_1PX = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUl
     await page.click('button[type=submit]');
     await page.waitForSelector('.board .tile');
     assert.ok((await page.locator('.who').innerText()).indexOf(people[0].id) === 0);
-    assert.strictEqual(await page.locator('.tile').count(), 4);       // ふりだし＋2歩＋あがり
+    assert.strictEqual(await page.locator('.tile').count(), 4);       // スタート＋2歩＋あがり
     assert.ok(/送信ずみ/.test(await pill(page)));
   });
   await test('ログインのあと「戻る」を押すと、ログイン画面ではなく紹介ページにもどる', async () => {
@@ -423,7 +423,7 @@ const PNG_1PX = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUl
     await login(page, people[1]);
     await page.waitForSelector('.board .tile');
     assert.ok((await page.locator('.who').innerText()).indexOf(people[1].id) === 0);
-    assert.ok(/ふりだし/.test(await page.locator('.tile--here').getAttribute('aria-label')));
+    assert.ok(/スタート/.test(await page.locator('.tile--here').getAttribute('aria-label')));
     assert.strictEqual(await page.locator('.tile--done').count(), 0);
   });
   await test('受付を止めると、ログインできず理由が出る', async () => {
