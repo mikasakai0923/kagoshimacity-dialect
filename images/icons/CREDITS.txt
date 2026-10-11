@@ -1,0 +1,9 @@
+このフォルダのイラストについて
+
+・多くのイラストは Twemoji（jdecked/twemoji）の絵文字画像です。
+  Copyright 2019 Twitter, Inc and other contributors
+  Graphics licensed under CC-BY 4.0: https://creativecommons.org/licenses/by/4.0/
+  https://github.com/jdecked/twemoji
+
+・vinegar.svg / back.svg / hoe.svg / sickle.svg は、このサイトのために
+  Twemoji に合わせた絵柄で新しく描いたものです（CC-BY 4.0）。
