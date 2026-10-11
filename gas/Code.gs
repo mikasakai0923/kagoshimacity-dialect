@@ -12,7 +12,7 @@
  * 「拡張機能 → Apps Script」に貼り付けて使います。
  */
 
-var KS_VERSION = '0.1.0';
+var KS_VERSION = '0.2.0';
 var KS_TZ = 'Asia/Tokyo';
 var KS_TOKEN_DAYS = 30;            // ログインの有効日数
 var KS_LOGIN_MAX_FAILS = 8;        // この回数まちがえると、しばらくログインできなくなる
@@ -50,7 +50,7 @@ var KS_DEFAULT_SETTINGS = [
    'すべての設問の上に出る説明です。'],
   ['語彙の質問文', '「{語}」のことをなんといいますか？', '{語} のところに提示語が入ります。'],
   ['例文の質問文', '「{文}」をなんといいますか？', '{文} のところに例文が入ります。'],
-  ['録音の上限（秒）', 30, '1回の録音の長さの上限です（5〜60）。'],
+  ['録音の上限（秒）', 20, '1回の録音の長さの上限です（5〜60）。長くすると、通信の弱い場所では送信に時間がかかります。'],
   ['参加者ナンバーの頭文字', 'K', 'メニュー「参加者を追加」で自動的に作るナンバーの頭文字です。']
 ];
 
@@ -217,11 +217,12 @@ function addParticipants(n) {
   var ss = ksSs_();
   var sh = ss.getSheetByName(KS_SHEETS.people);
   if (!sh) throw new Error('先に初期設定をしてください。');
-  var prefix = ksNorm_(ksSettings_()['参加者ナンバーの頭文字'] || 'K').toUpperCase() || 'K';
+  // 頭文字は英数字だけ（それ以外の文字は取りのぞく）
+  var prefix = ksNorm_(ksSettings_()['参加者ナンバーの頭文字'] || 'K').toUpperCase().replace(/[^A-Z0-9]/g, '') || 'K';
   var last = sh.getLastRow();
   var ids = last >= 2 ? sh.getRange(2, 1, last - 1, 1).getValues() : [];
   var max = 0;
-  var re = new RegExp('^' + prefix.replace(/[^A-Z0-9]/g, '') + '(\\d+)$');
+  var re = new RegExp('^' + prefix + '(\\d+)$');
   for (var i = 0; i < ids.length; i++) {
     var m = re.exec(ksNormId_(ids[i][0]));
     if (m) max = Math.max(max, parseInt(m[1], 10));
@@ -263,22 +264,22 @@ function refreshProgress() {
   var ss = ksSs_();
   var items = ksReadItems_();
   var total = items.length;
-  var itemIds = {};
+  var itemIds = Object.create(null);
   for (var i = 0; i < items.length; i++) itemIds[items[i].id] = true;
 
   var people = ksReadTable_(ss.getSheetByName(KS_SHEETS.people));
-  var stat = {}, order = [];
+  var stat = Object.create(null), order = [];
   for (var p = 0; p < people.length; p++) {
     var pid = ksNormId_(people[p]['参加者ナンバー']);
     if (!pid || stat[pid]) continue;
-    stat[pid] = { latest: {}, first: null, last: null };
+    stat[pid] = { latest: Object.create(null), first: null, last: null };
     order.push(pid);
   }
   var rows = ksReadTable_(ss.getSheetByName(KS_SHEETS.answers));
   for (var r = 0; r < rows.length; r++) {
     var id = ksNormId_(rows[r]['参加者ナンバー']);
     if (!id) continue;
-    if (!stat[id]) { stat[id] = { latest: {}, first: null, last: null }; order.push(id); }
+    if (!stat[id]) { stat[id] = { latest: Object.create(null), first: null, last: null }; order.push(id); }
     var at = rows[r]['送信日時'];
     var t = at instanceof Date ? at.getTime() : 0;
     var st = stat[id];
@@ -389,20 +390,28 @@ function ksHandleLogin_(req) {
 
   var cache = CacheService.getScriptCache();
   var key = 'fail:' + id;
-  var fails = Number(cache.get(key) || 0);
-  if (fails >= KS_LOGIN_MAX_FAILS) {
-    throw ksError_('locked', 'まちがいが続いたため、しばらくログインできません。15分ほどたってから、もう一度お試しください。');
+  var person;
+  // まちがいの回数を正しく数えるため、ログインの確認は1つずつ順番に行う
+  var lock = LockService.getScriptLock();
+  try { lock.waitLock(15000); }
+  catch (err) { throw ksError_('busy', 'いまこみあっています。少し待ってから、もう一度お試しください。'); }
+  try {
+    var fails = Number(cache.get(key) || 0);
+    if (fails >= KS_LOGIN_MAX_FAILS) {
+      throw ksError_('locked', 'まちがいが続いたため、しばらくログインできません。15分ほどたってから、もう一度お試しください。');
+    }
+    person = ksFindPerson_(id);
+    if (!person || !person.password || person.password !== pw) {
+      cache.put(key, String(fails + 1), KS_LOGIN_LOCK_SEC);
+      throw ksError_('bad_credentials', '参加者ナンバーかパスワードがちがいます。');
+    }
+    if (person.disabled) {
+      throw ksError_('disabled', 'この参加者ナンバーは、いま使えません。調査の担当者にお問い合わせください。');
+    }
+    cache.remove(key);
+  } finally {
+    lock.releaseLock();
   }
-
-  var person = ksFindPerson_(id);
-  if (!person || !person.password || person.password !== pw) {
-    cache.put(key, String(fails + 1), KS_LOGIN_LOCK_SEC);
-    throw ksError_('bad_credentials', '参加者ナンバーかパスワードがちがいます。');
-  }
-  if (person.disabled) {
-    throw ksError_('disabled', 'この参加者ナンバーは、いま使えません。調査の担当者にお問い合わせください。');
-  }
-  cache.remove(key);
 
   try {
     ksSs_().getSheetByName(KS_SHEETS.people).getRange(person.row, 6).setValue(new Date());
@@ -488,7 +497,7 @@ function ksHandleBootstrap_(req) {
   var set = ksSettings_();
   var items = ksReadItems_();
   var maxSec = Number(set['録音の上限（秒）']);
-  if (!(maxSec >= 5 && maxSec <= 60)) maxSec = 30;
+  if (!(maxSec >= 5 && maxSec <= 60)) maxSec = 20;
   return ksOk_({
     participant: { id: person.id },
     settings: {
@@ -535,7 +544,7 @@ function ksReadItems_() {
     });
   }
   out.sort(function (a, b) { return a.step - b.step || a.order - b.order || a._row - b._row; });
-  var seen = {};
+  var seen = Object.create(null);
   var uniq = [];
   for (var j = 0; j < out.length; j++) {
     if (seen[out[j].id]) continue;      // 同じ設問IDが2回あったら、最初の1つだけ使う
@@ -560,12 +569,12 @@ function ksSplitSegments_(v) {
 
 function ksReadSteps_(items) {
   var rows = ksReadTable_(ksSs_().getSheetByName(KS_SHEETS.steps));
-  var titles = {};
+  var titles = Object.create(null);
   for (var i = 0; i < rows.length; i++) {
     var no = parseInt(rows[i]['歩'], 10);
     if (no >= 1) titles[no] = { title: String(rows[i]['タイトル'] || '').trim(), icon: String(rows[i]['アイコン'] || '').trim() };
   }
-  var counts = {};
+  var counts = Object.create(null);
   for (var j = 0; j < items.length; j++) counts[items[j].step] = (counts[items[j].step] || 0) + 1;
   var nos = Object.keys(counts).map(Number).sort(function (a, b) { return a - b; });
   return nos.map(function (no) {
@@ -577,23 +586,70 @@ function ksReadSteps_(items) {
 function ksReadProgress_(personId) {
   var sh = ksSs_().getSheetByName(KS_SHEETS.answers);
   var last = sh.getLastRow();
-  var out = {};
+  var out = Object.create(null);
   if (last < 2) return out;
-  var H = KS_HEADERS.answers;
-  var cAt = H.indexOf('送信日時'), cId = H.indexOf('参加者ナンバー'), cItem = H.indexOf('設問ID'), cStatus = H.indexOf('回答の状態');
-  var vals = sh.getRange(2, 1, last - 1, Math.max(cAt, cId, cItem, cStatus) + 1).getValues();
+  var idx = ksAnswerLayout_(sh).idx;
+  var cAt = idx['送信日時'], cId = idx['参加者ナンバー'], cItem = idx['設問ID'], cStatus = idx['回答の状態'];
+  var first = Math.min(cAt, cId, cItem, cStatus), width = Math.max(cAt, cId, cItem, cStatus) - first + 1;
+  var vals = sh.getRange(2, first + 1, last - 1, width).getValues();
   for (var i = 0; i < vals.length; i++) {
-    if (ksNormId_(vals[i][cId]) !== personId) continue;
-    var itemId = String(vals[i][cItem]);
-    var at = vals[i][cAt] instanceof Date ? vals[i][cAt].getTime() : 0;
+    if (ksNormId_(vals[i][cId - first]) !== personId) continue;
+    var itemId = String(vals[i][cItem - first]);
+    if (!itemId) continue;
+    var at = vals[i][cAt - first] instanceof Date ? vals[i][cAt - first].getTime() : 0;
+    var status = String(vals[i][cStatus - first] || '回答済');
     var prev = out[itemId];
-    if (!prev) out[itemId] = { status: String(vals[i][cStatus] || '回答済'), at: at, count: 1 };
+    if (!prev) out[itemId] = { status: status, at: at, count: 1 };
     else {
       prev.count++;
-      if (at >= prev.at) { prev.at = at; prev.status = String(vals[i][cStatus] || '回答済'); }
+      if (at >= prev.at) { prev.at = at; prev.status = status; }
     }
   }
   return out;
+}
+
+/**
+ * 「回答」シートの見出し（1行目）を読んで、どの見出しが何列目にあるかを返します。
+ * 調査者が列を足したり並べかえたりしても、見出しの名前が同じなら正しい列に書きこめます。
+ */
+function ksAnswerLayout_(sheet) {
+  var lastCol = sheet.getLastColumn();
+  var head = lastCol > 0 ? sheet.getRange(1, 1, 1, lastCol).getValues()[0] : [];
+  var idx = Object.create(null);
+  for (var i = 0; i < head.length; i++) {
+    var h = String(head[i]).trim();
+    if (h && idx[h] === undefined) idx[h] = i;
+  }
+  var need = ['送信日時', '参加者ナンバー', '設問ID', '回答の状態', '送信ID'];
+  for (var n = 0; n < need.length; n++) {
+    if (idx[need[n]] === undefined) {
+      console.error('「回答」シートの見出し「' + need[n] + '」が見つかりません。1行目の見出しを元にもどしてください。');
+      throw ksError_('server_error', '保存先の表の形が変わっているため、保存できませんでした。調査の担当者にお知らせください。');
+    }
+  }
+  return { head: head, idx: idx, width: head.length };
+}
+
+/**
+ * 回答を1行、表のいちばん下に書きこみます（record は「見出し → 値」）。
+ * 文字の欄は、書きこむ前に「書式なしテキスト」にします。こうしておくと、「001」のような回答が数字に
+ * 変わったり、「=」で始まる回答が数式として動いたりしません。
+ */
+function ksAppendAnswer_(sheet, layout, record) {
+  var row = sheet.getLastRow() + 1;
+  if (row > sheet.getMaxRows()) sheet.insertRowsAfter(sheet.getMaxRows(), 500);
+  var range = sheet.getRange(row, 1, 1, layout.width);
+  var formats = range.getNumberFormats()[0];
+  var values = [];
+  for (var c = 0; c < layout.width; c++) {
+    var h = String(layout.head[c]).trim();
+    var v = (h && Object.prototype.hasOwnProperty.call(record, h)) ? record[h] : '';
+    if (v instanceof Date) formats[c] = 'yyyy-mm-dd hh:mm:ss';
+    else if (typeof v === 'string' && v !== '' && !/リンク$/.test(h)) formats[c] = '@';
+    values.push(v);
+  }
+  range.setNumberFormats([formats]);
+  range.setValues([values]);
 }
 
 /* ---------- 回答と録音を保存する ---------- */
@@ -603,7 +659,7 @@ function ksHandleSave_(req) {
   var s = req.submission;
   if (!s || typeof s !== 'object') throw ksError_('bad_request', '回答の内容が空でした。');
 
-  var sid = String(s.sid || '');
+  var sid = String(s.submissionId || s.sid || '');
   if (!/^[A-Za-z0-9_-]{8,64}$/.test(sid)) throw ksError_('bad_request', '送信IDが正しくありません。');
   var itemId = ksText_(s.itemId, 60);
   if (!itemId) throw ksError_('bad_request', '設問IDがありません。');
@@ -611,13 +667,19 @@ function ksHandleSave_(req) {
 
   var cache = CacheService.getScriptCache();
   var sheet = ksSs_().getSheetByName(KS_SHEETS.answers);
-  if (cache.get('sid:' + sid) || ksHasSid_(sheet, sid)) {
+  if (!sheet) {
+    console.error('「回答」シートが見つかりません。シートの名前を元にもどすか、初期設定をやり直してください。');
+    throw ksError_('server_error', '保存先の表が見つからないため、保存できませんでした。調査の担当者にお知らせください。');
+  }
+  var layout = ksAnswerLayout_(sheet);
+  if (cache.get('sid:' + sid) || ksHasSid_(sheet, layout, sid)) {
     return ksOk_({ sid: sid, duplicate: true });       // 同じ回答がもう保存されている（送り直し）
   }
 
   // 録音をドライブに保存する
   var audio = Array.isArray(s.audio) ? s.audio.slice(0, 2) : [];
   var files = {};
+  var saved = 0;
   var info = { app: ksText_(s.app, 40) };
   if (audio.length) {
     var folder = ksPersonFolder_(person.id);
@@ -635,44 +697,53 @@ function ksHandleSave_(req) {
       }
       var name = ksSafeName_(person.id) + '_' + ksSafeName_(itemId) + '_' + (slot === 'example' ? 'reibun' : 'kaitou') +
                  '_' + stamp + '_' + sid.substr(0, 6) + '.wav';
+      // 送り直しで同じ名前の録音がもうあれば、それを使う（ごみ箱の中のものは使わない）
+      var file = null;
       var existing = folder.getFilesByName(name);
-      var file = existing.hasNext() ? existing.next() : folder.createFile(Utilities.newBlob(bytes, 'audio/wav', name));
+      while (existing.hasNext()) {
+        var f = existing.next();
+        if (!f.isTrashed()) { file = f; break; }
+      }
+      if (!file) file = folder.createFile(Utilities.newBlob(bytes, 'audio/wav', name));
       files[slot] = { name: name, url: file.getUrl() };
+      saved++;
       var tag = slot === 'example' ? 'ex' : 'main';
       info[tag] = {
         sec: ksNum_(a.durationSec), hz: ksNum_(a.sampleRate), peak: ksNum_(a.peak), bytes: bytes.length,
         ec: a.echoCancellation === true, ns: a.noiseSuppression === true, agc: a.autoGainControl === true
       };
+      if (a.trackHz) info[tag].trackHz = ksNum_(a.trackHz);
+      if (a.input) info[tag].input = ksText_(a.input, 20);
     }
   }
 
   var main = info.main || {};
-  var row = [
-    new Date(),
-    person.id,
-    ksNum_(s.step),
-    itemId,
-    ksText_(s.type, 10),
-    ksText_(s.prompt, KS_MAX_TEXT),
-    status,
-    ksText_(s.answer, KS_MAX_TEXT),
-    ksText_(s.segPrompt, KS_MAX_TEXT),
-    ksText_(s.segAnswer, KS_MAX_TEXT),
-    ksText_(s.exampleAnswer, KS_MAX_TEXT),
-    ksText_(s.note, KS_MAX_TEXT),
-    files.main ? files.main.name : '',
-    files.main ? files.main.url : '',
-    files.example ? files.example.name : '',
-    files.example ? files.example.url : '',
-    ksText_(s.noAudioReason, 60),
-    main.sec === '' || main.sec == null ? '' : main.sec,
-    main.hz === '' || main.hz == null ? '' : main.hz,
-    ksNum_(s.elapsedSec),
-    ksText_(s.device, 200),
-    ksText_(s.clientTime, 40),
-    sid,
-    JSON.stringify(info)
-  ];
+  var record = {
+    '送信日時': new Date(),
+    '参加者ナンバー': person.id,
+    '歩': ksNum_(s.step),
+    '設問ID': itemId,
+    '種別': ksText_(s.type, 10),
+    '提示語・例文': ksText_(s.prompt, KS_MAX_TEXT),
+    '回答の状態': status,
+    '回答（地域の言葉）': ksText_(s.answer, KS_MAX_TEXT),
+    '文節（提示）': ksText_(s.segPrompt, KS_MAX_TEXT),
+    '文節（回答）': ksText_(s.segAnswer, KS_MAX_TEXT),
+    '提案例文の回答': ksText_(s.exampleAnswer, KS_MAX_TEXT),
+    '別形・意味・補足': ksText_(s.note, KS_MAX_TEXT),
+    '録音1': files.main ? files.main.name : '',
+    '録音1リンク': files.main ? files.main.url : '',
+    '録音2': files.example ? files.example.name : '',
+    '録音2リンク': files.example ? files.example.url : '',
+    '録音なしの理由': ksText_(s.noAudioReason, 60),
+    '録音の長さ（秒）': main.sec === '' || main.sec == null ? '' : main.sec,
+    'サンプリング周波数': main.hz === '' || main.hz == null ? '' : main.hz,
+    '回答にかかった秒数': ksNum_(s.elapsedSec),
+    '端末': ksText_(s.device, 200),
+    '端末での回答日時': ksText_(s.clientTime, 40),
+    '送信ID': sid,
+    '技術情報': JSON.stringify(info)
+  };
 
   var lock = LockService.getScriptLock();
   try {
@@ -681,57 +752,71 @@ function ksHandleSave_(req) {
     throw ksError_('busy', 'いま保存先がこみあっています。少しあとで自動的に送り直します。');
   }
   try {
-    if (ksHasSid_(sheet, sid)) return ksOk_({ sid: sid, duplicate: true });
-    sheet.appendRow(row);
+    SpreadsheetApp.flush();     // ほかの人の書きこみを反映してから、二重登録でないかをもう一度確かめる
+    if (cache.get('sid:' + sid) || ksHasSid_(sheet, layout, sid)) return ksOk_({ sid: sid, duplicate: true });
+    ksAppendAnswer_(sheet, layout, record);
+    SpreadsheetApp.flush();     // 表に書きこまれたことを確かめてから「保存した」と答える
     cache.put('sid:' + sid, '1', 21600);
   } finally {
     lock.releaseLock();
   }
-  return ksOk_({ sid: sid, saved: true, audio: Object.keys(files).length });
+  return ksOk_({ sid: sid, saved: true, audio: saved });
 }
 
-function ksHasSid_(sheet, sid) {
+function ksHasSid_(sheet, layout, sid) {
   var last = sheet.getLastRow();
   if (last < 2) return false;
-  var col = KS_HEADERS.answers.indexOf('送信ID') + 1;
-  var vals = sheet.getRange(2, col, last - 1, 1).getValues();
+  var vals = sheet.getRange(2, layout.idx['送信ID'] + 1, last - 1, 1).getValues();
   for (var i = vals.length - 1; i >= 0; i--) {
-    if (vals[i][0] === sid) return true;
+    if (String(vals[i][0]) === sid) return true;
   }
   return false;
 }
 
 function ksAudioFolderOrNull_() {
   var id = PropertiesService.getScriptProperties().getProperty('AUDIO_FOLDER_ID');
-  if (!id) return null;
+  return id ? ksLiveFolder_(id) : null;
+}
+
+/** IDからフォルダを取り出す。なくなっていたり、ごみ箱に入っていたりしたら null。 */
+function ksLiveFolder_(id) {
   try {
     var f = DriveApp.getFolderById(id);
-    if (f.isTrashed()) return null;
-    return f;
+    return f.isTrashed() ? null : f;
   } catch (err) { return null; }
 }
 
-/** 参加者ごとの録音フォルダ（なければ作る）。 */
+/** 参加者ごとの録音フォルダ（なければ作る。ごみ箱に入っているものは使わない）。 */
 function ksPersonFolder_(personId) {
   var cache = CacheService.getScriptCache();
   var key = 'folder:' + personId;
   var cached = cache.get(key);
-  if (cached) {
-    try { return DriveApp.getFolderById(cached); } catch (err) { /* 下で探し直す */ }
-  }
+  var folder = cached ? ksLiveFolder_(cached) : null;
+  if (folder) return folder;
+
   var root = ksAudioFolderOrNull_();
-  if (!root) throw ksError_('not_ready', '録音フォルダが見つかりません。調査の担当者にお知らせください。');
+  if (!root) {
+    console.error('録音フォルダが見つかりません（ごみ箱に入っていないか確かめるか、初期設定をやり直してください）。');
+    throw ksError_('server_error', '録音の保存先が見つからないため、保存できませんでした。調査の担当者にお知らせください。');
+  }
   var name = ksSafeName_(personId);
   var lock = LockService.getScriptLock();
   try { lock.waitLock(20000); } catch (err) { throw ksError_('busy', 'いま保存先がこみあっています。少しあとで自動的に送り直します。'); }
-  var folder;
   try {
-    var it = root.getFoldersByName(name);
-    folder = it.hasNext() ? it.next() : root.createFolder(name);
+    cached = cache.get(key);                      // 待っているあいだに、ほかの処理が作ったかもしれない
+    folder = cached ? ksLiveFolder_(cached) : null;
+    if (!folder) {
+      var it = root.getFoldersByName(name);
+      while (it.hasNext()) {
+        var f = it.next();
+        if (!f.isTrashed()) { folder = f; break; }
+      }
+      if (!folder) folder = root.createFolder(name);
+      cache.put(key, folder.getId(), 21600);
+    }
   } finally {
     lock.releaseLock();
   }
-  cache.put(key, folder.getId(), 21600);
   return folder;
 }
 
@@ -739,11 +824,13 @@ function ksPersonFolder_(personId) {
  * 小さな道具
  * ============================================================ */
 
+var KS_SS_CACHE_ = null;     // 1回の処理の中では、スプレッドシートを開くのは1度だけにする
 function ksSs_() {
+  if (KS_SS_CACHE_) return KS_SS_CACHE_;
   var id = PropertiesService.getScriptProperties().getProperty('SPREADSHEET_ID');
-  if (id) return SpreadsheetApp.openById(id);
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var ss = id ? SpreadsheetApp.openById(id) : SpreadsheetApp.getActiveSpreadsheet();
   if (!ss) throw ksError_('not_ready', '保存先の初期設定がまだ終わっていません。');
+  KS_SS_CACHE_ = ss;
   return ss;
 }
 

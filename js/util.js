@@ -2,7 +2,7 @@
 (function () {
   'use strict';
   var KS = window.KS = window.KS || {};
-  KS.VERSION = '0.1.0';
+  KS.VERSION = '0.2.0';
 
   /* ---------- 画面の部品を作る ---------- */
 
@@ -58,6 +58,7 @@
 
   /* ---------- 文字 ---------- */
 
+  // 参加者ナンバーとパスワード用：全角の英数字を半角にそろえる
   KS.norm = function (v) {
     var s = String(v == null ? '' : v);
     if (s.normalize) s = s.normalize('NFKC');
@@ -65,10 +66,24 @@
   };
   KS.normId = function (v) { return KS.norm(v).replace(/\s+/g, '').toUpperCase(); };
 
-  // ひらがな・カタカナ・のばす音・句読点・空白だけなら true
-  KS.isKana = function (s) {
-    return /^[ぁ-ゖ゛-ゟァ-ヺー-ヿ　-。！？!?,.・〜~「」（）()\s\-‐-―]*$/.test(String(s || ''));
+  // 回答用：書かれたとおりに残す（「か゜」のような書き方や、全角・半角を勝手に変えない）。
+  // 取りのぞくのは、前後の空白と、目に見えない制御文字だけ。改行は残す。
+  KS.clean = function (v) {
+    return String(v == null ? '' : v)
+      .replace(/\r\n?/g, '\n').replace(/\t/g, ' ')
+      .replace(/[\u0000-\u0009\u000b-\u001f\u007f]/g, '').trim();
   };
+
+  // ひらがな・カタカナ（半角も）・濁点や半濁点・のばす音・句読点・空白だけなら true
+  var KANA_RE = new RegExp('^[' +
+    '\\u3041-\\u309F' +          // ひらがな（濁点・半濁点の記号をふくむ）
+    '\\u30A1-\\u30FF\\u31F0-\\u31FF' +   // カタカナ・のばす音・中点
+    '\\uFF65-\\uFF9F' +          // 半角カタカナ
+    '\\u3000-\\u3002\\uFF0C\\uFF0E\\uFF01\\uFF1F!?,.\\u2026' +   // 空白・句読点・！？…
+    '\\u301C\\uFF5E~\\u300C\\u300D\\uFF08\\uFF09()' +         // 〜「」（）
+    '\\s\\-\\u2010-\\u2015' +        // 空白・ハイフンのなかま
+    ']*$');
+  KS.isKana = function (s) { return KANA_RE.test(String(s || '')); };
 
   KS.fmtTime = function (sec) {
     sec = Math.max(0, Math.round(sec || 0));
@@ -151,7 +166,29 @@
     return !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
   };
 
+  /* ---------- 押しまちがいを防ぐ ---------- */
+
+  // 画面や確認の窓が切りかわった直後の「押す」は受けつけない。
+  // （ボタンを2回続けて押したとき、2回目が、新しく出た画面のボタンに当たってしまうのを防ぐ）
+  var cfg = window.KS_CONFIG || {};
+  var TAP_GUARD_MS = (typeof cfg.tapGuardMs === 'number' && cfg.tapGuardMs >= 0) ? cfg.tapGuardMs : 400;
+  var guardUntil = 0;
+  KS.guardTaps = function (ms) {
+    var until = Date.now() + (typeof ms === 'number' ? ms : TAP_GUARD_MS);
+    if (until > guardUntil) guardUntil = until;
+  };
+  document.addEventListener('click', function (e) {
+    // 人が押したものだけを止める（プログラムが出す click は通す）
+    if (e.isTrusted !== false && Date.now() < guardUntil) { e.stopPropagation(); e.preventDefault(); }
+  }, true);
+
   /* ---------- 確認の窓・ひとこと ---------- */
+
+  var openDialogs = [];
+  // 開いている確認の窓をすべて閉じる（画面を切りかえるとき）
+  KS.closeDialogs = function () {
+    openDialogs.slice().forEach(function (close) { close(null); });
+  };
 
   // KS.dialog({title, body, actions:[{label, value, kind}]}) → 押されたボタンの value（閉じたら null）
   KS.dialog = function (opt) {
@@ -163,13 +200,16 @@
       function close(value) {
         if (done) return;
         done = true;
+        openDialogs = openDialogs.filter(function (c) { return c !== close; });
         document.removeEventListener('keydown', onKey, true);
         if (wrap.parentNode) wrap.parentNode.removeChild(wrap);
-        document.body.classList.remove('has-dialog');
-        if (prev && prev.focus) { try { prev.focus(); } catch (e) { /* 何もしない */ } }
+        if (!openDialogs.length) document.body.classList.remove('has-dialog');
+        KS.guardTaps();
+        if (prev && prev.focus && document.body.contains(prev)) { try { prev.focus(); } catch (e) { /* 何もしない */ } }
         resolve(value);
       }
       function onKey(e) {
+        if (openDialogs[openDialogs.length - 1] !== close) return;     // いちばん上の窓だけが受けつける
         if (e.key === 'Escape') { e.preventDefault(); close(null); }
         if (e.key === 'Tab') {
           var f = box.querySelectorAll('button, [href], input, textarea, [tabindex]:not([tabindex="-1"])');
@@ -197,8 +237,10 @@
       );
       var wrap = h('div', { class: 'dialog-wrap', onclick: function (e) { if (e.target === wrap) close(null); } }, box);
       layer.appendChild(wrap);
+      openDialogs.push(close);
       document.body.classList.add('has-dialog');
       document.addEventListener('keydown', onKey, true);
+      KS.guardTaps();
       var target = box.querySelector('.btn--primary') || box.querySelector('button');
       if (target) target.focus();
     });

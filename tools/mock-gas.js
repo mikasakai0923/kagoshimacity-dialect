@@ -40,9 +40,20 @@ function createGasWorld(codePath) {
     setValue(v) { for (let r = 0; r < this.nr; r++) for (let c = 0; c < this.nc; c++) this.sheet._set(this.row + r, this.col + c, v); return this; }
     setNumberFormat(f) {
       for (let c = 0; c < this.nc; c++) {
-        if (this.nr >= 100000) this.sheet.colFormat[this.col + c] = f;
+        // 列全体の書式は「そのとき存在していた行」までにしか付かないものとして扱う（厳しめの想定）
+        if (this.nr >= 100000) this.sheet.colFormat[this.col + c] = { f, upTo: this.sheet.maxRows };
         else for (let r = 0; r < this.nr; r++) this.sheet.cellFormat[(this.row + r) + ':' + (this.col + c)] = f;
       }
+      return this;
+    }
+    getNumberFormats() {
+      const out = [];
+      for (let r = 0; r < this.nr; r++) { const line = []; for (let c = 0; c < this.nc; c++) line.push(this.sheet._format(this.row + r, this.col + c) || '0.###############'); out.push(line); }
+      return out;
+    }
+    setNumberFormats(fm) {
+      if (fm.length !== this.nr || fm.some(v => v.length !== this.nc)) throw new Error('setNumberFormats: 大きさが合いません');
+      for (let r = 0; r < this.nr; r++) for (let c = 0; c < this.nc; c++) this.sheet.cellFormat[(this.row + r) + ':' + (this.col + c)] = fm[r][c];
       return this;
     }
     setFontWeight() { return this; }
@@ -51,11 +62,18 @@ function createGasWorld(codePath) {
   }
 
   class Sheet {
-    constructor(name) { this.name = name; this.rows = []; this.colFormat = {}; this.cellFormat = {}; this.formulas = []; }
+    constructor(name) { this.name = name; this.rows = []; this.colFormat = {}; this.cellFormat = {}; this.formulas = []; this.maxRows = 1000; }
     getName() { return this.name; }
-    _format(r, c) { return this.cellFormat[r + ':' + c] || this.colFormat[c] || ''; }
+    getMaxRows() { return this.maxRows; }
+    insertRowsAfter(after, n) { if (after > this.maxRows || after < 1) throw new Error('mock: その行はシートの外です'); this.maxRows += n; return this; }
+    _format(r, c) {
+      if (this.cellFormat[r + ':' + c]) return this.cellFormat[r + ':' + c];
+      const cf = this.colFormat[c];
+      return cf && r <= cf.upTo ? cf.f : '';
+    }
     _get(r, c) { const row = this.rows[r - 1]; const v = row ? row[c - 1] : ''; return v === undefined ? '' : v; }
     _set(r, c, v) {
+      if (r > this.maxRows) throw new Error('mock: シートの行数（' + this.maxRows + '）をこえて書きこもうとしました');
       while (this.rows.length < r) this.rows.push([]);
       const row = this.rows[r - 1];
       while (row.length < c) row.push('');
@@ -87,7 +105,7 @@ function createGasWorld(codePath) {
       return new Range(this, a, b, c === undefined ? 1 : c, d === undefined ? 1 : d);
     }
     getDataRange() { return new Range(this, 1, 1, Math.max(this.getLastRow(), 1), Math.max(this.getLastColumn(), 1)); }
-    appendRow(arr) { const r = this.getLastRow() + 1; arr.forEach((v, i) => this._set(r, i + 1, v)); return this; }
+    appendRow(arr) { const r = this.getLastRow() + 1; if (r > this.maxRows) this.maxRows = r; arr.forEach((v, i) => this._set(r, i + 1, v)); return this; }
     clearContents() { this.rows = []; return this; }
     setFrozenRows() {} setColumnWidth() {}
   }
@@ -122,12 +140,15 @@ function createGasWorld(codePath) {
     getId() { return this.id; } getName() { return this.name; }
     getUrl() { return 'https://drive.google.com/file/d/' + this.id + '/view'; }
     getParents() { return iter(this.parent ? [this.parent] : []); }
+    isTrashed() { return !!this.trashed || !!(this.parent && this.parent.isTrashed && this.parent.isTrashed()); }
+    setTrashed(v) { this.trashed = !!v; return this; }
   }
   class DFolder {
     constructor(name, parent) { this.id = 'D_' + crypto.randomBytes(8).toString('hex'); this.name = name; this.parent = parent; this.children = []; this.trashed = false; driveItems[this.id] = this; }
     getId() { return this.id; } getName() { return this.name; }
     getUrl() { return 'https://drive.google.com/drive/folders/' + this.id; }
-    isTrashed() { return this.trashed; }
+    isTrashed() { return this.trashed || !!(this.parent && this.parent.isTrashed()); }
+    setTrashed(v) { this.trashed = !!v; return this; }
     createFolder(name) { const f = new DFolder(name, this); this.children.push(f); return f; }
     getFoldersByName(name) { return iter(this.children.filter(c => c instanceof DFolder && c.name === name)); }
     getFilesByName(name) { return iter(this.children.filter(c => c instanceof DFile && c.name === name)); }
@@ -155,6 +176,7 @@ function createGasWorld(codePath) {
     JSON, Math, Date, String, Number, Array, Object, RegExp, parseInt, parseFloat, isNaN, isFinite, Error,
     SpreadsheetApp: {
       getActiveSpreadsheet: () => ss,
+      flush: () => { control.flushes = (control.flushes || 0) + 1; },
       openById: (id) => { if (id !== ss.id) throw new Error('mock: 見つからないスプレッドシート ' + id); return ss; },
       getUi: () => ui
     },
@@ -199,11 +221,16 @@ function createGasWorld(codePath) {
   vm.createContext(sandbox);
   vm.runInContext(fs.readFileSync(codePath, 'utf8'), sandbox, { filename: path.basename(codePath) });
 
-  // テスト用：appendRow を失敗させる仕掛け
+  // テスト用：「回答」シートへの書きこみを失敗させる仕掛け
   const origAppend = Sheet.prototype.appendRow;
   Sheet.prototype.appendRow = function (arr) {
     if (this.name === '回答' && control.failAppend > 0) { control.failAppend--; throw new Error('mock: 追記に失敗（テスト）'); }
     return origAppend.call(this, arr);
+  };
+  const origSetValues = Range.prototype.setValues;
+  Range.prototype.setValues = function (vals) {
+    if (this.sheet.name === '回答' && this.row > 1 && control.failAppend > 0) { control.failAppend--; throw new Error('mock: 追記に失敗（テスト）'); }
+    return origSetValues.call(this, vals);
   };
 
   return {
@@ -216,15 +243,21 @@ function createGasWorld(codePath) {
       return JSON.parse(out.getContent());
     },
     sheetRows(name) { const s = ss.getSheetByName(name); return s ? s.rows.map(r => r.slice()) : null; },
-    files() {
+    files(includeTrashed) {
       const out = [];
       (function walk(folder, prefix) {
         for (const c of folder.children) {
+          if (!includeTrashed && c.isTrashed()) continue;
           if (c instanceof DFolder) walk(c, prefix + c.name + '/');
-          else if (c.id !== ss.id) out.push({ path: prefix + c.name, bytes: c.bytes.length, id: c.id });
+          else if (c.id !== ss.id) out.push({ path: prefix + c.name, bytes: c.bytes.length, id: c.id, trashed: c.isTrashed() });
         }
       })(myDrive, '');
       return out;
+    },
+    folder(pathParts) {
+      let f = myDrive;
+      for (const part of pathParts) { f = f.children.find(c => c instanceof DFolder && c.name === part && !c.isTrashed()) || f.children.find(c => c instanceof DFolder && c.name === part); if (!f) return null; }
+      return f;
     },
     fileBytes(id) { return driveItems[id].bytes; }
   };
