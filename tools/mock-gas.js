@@ -38,6 +38,7 @@ function createGasWorld(codePath) {
       return this;
     }
     setValue(v) { for (let r = 0; r < this.nr; r++) for (let c = 0; c < this.nc; c++) this.sheet._set(this.row + r, this.col + c, v); return this; }
+    getValue() { return this.sheet._get(this.row, this.col); }
     setNumberFormat(f) {
       for (let c = 0; c < this.nc; c++) {
         // 列全体の書式は「そのとき存在していた行」までにしか付かないものとして扱う（厳しめの想定）
@@ -61,9 +62,11 @@ function createGasWorld(codePath) {
     setWrap() { return this; }
   }
 
+  let gidSeq = 100;
   class Sheet {
-    constructor(name) { this.name = name; this.rows = []; this.colFormat = {}; this.cellFormat = {}; this.formulas = []; this.maxRows = 1000; this.maxCols = 26; }
+    constructor(name) { this.name = name; this.rows = []; this.colFormat = {}; this.cellFormat = {}; this.formulas = []; this.maxRows = 1000; this.maxCols = 26; this.gid = gidSeq += 7; }
     getName() { return this.name; }
+    getSheetId() { return this.gid; }
     getMaxRows() { return this.maxRows; }
     getMaxColumns() { return this.maxCols; }
     insertRowsAfter(after, n) { if (after > this.maxRows || after < 1) throw new Error('mock: その行はシートの外です'); this.maxRows += n; return this; }
@@ -116,6 +119,7 @@ function createGasWorld(codePath) {
   class Spreadsheet {
     constructor(id, name) { this.id = id; this.name = name; this.sheets = [new Sheet('シート1')]; this.toasts = []; }
     getId() { return this.id; } getName() { return this.name; }
+    getUrl() { return 'https://docs.google.com/spreadsheets/d/' + this.id + '/edit'; }
     setSpreadsheetTimeZone(tz) { this.tz = tz; }
     getSheetByName(n) { return this.sheets.find(s => s.name === n) || null; }
     insertSheet(n) { if (this.getSheetByName(n)) throw new Error('同じ名前のシートがあります'); const s = new Sheet(n); this.sheets.push(s); return s; }
@@ -132,6 +136,7 @@ function createGasWorld(codePath) {
     _promptAnswer: '3',
     createMenu() { const m = { addItem() { return m; }, addSeparator() { return m; }, addToUi() { uiLog.push('menu'); } }; return m; },
     alert(...a) { uiLog.push(['alert', ...a]); return 'OK'; },
+    showModalDialog(output, title) { if (!output || output._html === undefined) throw new Error('mock: showModalDialog には HtmlOutput を渡してください'); ui._lastDialog = output; uiLog.push(['dialog', title, output._width, output._height]); },
     prompt(...a) { uiLog.push(['prompt', ...a]); return { getSelectedButton: () => 'OK', getResponseText: () => ui._promptAnswer }; }
   };
 
@@ -145,6 +150,9 @@ function createGasWorld(codePath) {
     getParents() { return iter(this.parent ? [this.parent] : []); }
     isTrashed() { return !!this.trashed || !!(this.parent && this.parent.isTrashed && this.parent.isTrashed()); }
     setTrashed(v) { this.trashed = !!v; return this; }
+    getSize() { return this.bytes.length; }
+    getMimeType() { return this.mime; }
+    getBlob() { return blob(toSigned(this.bytes), this.mime, this.name); }
   }
   class DFolder {
     constructor(name, parent) { this.id = 'D_' + crypto.randomBytes(8).toString('hex'); this.name = name; this.parent = parent; this.children = []; this.trashed = false; driveItems[this.id] = this; }
@@ -165,6 +173,24 @@ function createGasWorld(codePath) {
   const props = {};
   const cache = {};
   const control = { lockBusy: 0, failAppend: 0, delayMs: 0, calls: [] };
+  // だれが動かしているか。ふだん（エディタやメニューから）は、持ち主本人。
+  // ウェブアプリは「持ち主として実行」されるので、effective はいつも持ち主、active はページを開いた人
+  // （持ち主以外の人や、ログインしていない人のメールアドレスは、実物では空になる）。
+  const OWNER = 'owner@example.com';
+  const session = { active: OWNER, effective: OWNER };
+  const META_NAMES = ['apple-mobile-web-app-capable', 'google-site-verification', 'mobile-web-app-capable', 'viewport'];
+  function htmlOutput(html) {
+    return {
+      _html: String(html), _title: '', _meta: [], _width: null, _height: null,
+      setTitle(t) { this._title = String(t); return this; },
+      addMetaTag(name, content) { if (META_NAMES.indexOf(name) < 0) throw new Error('mock: この名前の meta タグは使えません: ' + name); this._meta.push([name, content]); return this; },
+      setWidth(w) { this._width = w; return this; },
+      setHeight(h) { this._height = h; return this; },
+      setXFrameOptionsMode() { return this; },
+      setSandboxMode() { return this; },
+      getContent() { return this._html; }
+    };
+  }
 
   function toSigned(buf) { return Array.from(buf).map(b => (b > 127 ? b - 256 : b)); }
   function fromSigned(arr) { return Buffer.from(Uint8Array.from(arr.map(b => (b + 256) % 256))); }
@@ -206,6 +232,7 @@ function createGasWorld(codePath) {
         return fmt.replace(/yyyy|MM|dd|HH|mm|ss/g, k => map[k]);
       },
       base64Decode: s => { if (!/^[A-Za-z0-9+/=\s]*$/.test(s)) throw new Error('bad base64'); return toSigned(Buffer.from(s, 'base64')); },
+      base64Encode: data => (typeof data === 'string' ? Buffer.from(data, 'utf8') : fromSigned(data)).toString('base64'),
       base64EncodeWebSafe: data => (typeof data === 'string' ? Buffer.from(data, 'utf8') : fromSigned(data)).toString('base64').replace(/\+/g, '-').replace(/\//g, '_'),
       base64DecodeWebSafe: s => toSigned(Buffer.from(s.replace(/-/g, '+').replace(/_/g, '/'), 'base64')),
       computeHmacSha256Signature: (value, key) => toSigned(crypto.createHmac('sha256', key).update(value, 'utf8').digest()),
@@ -216,8 +243,17 @@ function createGasWorld(codePath) {
       getFolderById: id => { const f = driveItems[id]; if (!(f instanceof DFolder)) throw new Error('mock: フォルダなし'); return f; },
       createFolder: name => myDrive.createFolder(name)
     },
+    Session: {
+      getActiveUser: () => ({ getEmail: () => session.active }),
+      getEffectiveUser: () => ({ getEmail: () => session.effective })
+    },
+    HtmlService: {
+      createHtmlOutput: html => htmlOutput(html),
+      XFrameOptionsMode: { ALLOWALL: 'ALLOWALL', DEFAULT: 'DEFAULT' },
+      SandboxMode: { IFRAME: 'IFRAME' }
+    },
     ContentService: {
-      MimeType: { JSON: 'application/json' },
+      MimeType: { JSON: 'application/json', TEXT: 'text/plain' },
       createTextOutput: text => ({ _text: text, _mime: 'text/plain', setMimeType(m) { this._mime = m; return this; }, getContent() { return this._text; } })
     }
   };
@@ -238,6 +274,14 @@ function createGasWorld(codePath) {
 
   return {
     sandbox, ss, ui, uiLog, props, cache, control, myDrive, driveItems, DFolder, DFile,
+    OWNER, session,
+    webUser: '',          // ウェブアプリのURLを開いている人（'' はログインしていない人。OWNER にすると持ち主本人）
+    // ウェブアプリとして（＝持ち主として実行、開いた人は email）動かす
+    asVisitor(email, fn) {
+      const keep = { active: session.active, effective: session.effective };
+      session.active = email || ''; session.effective = OWNER;
+      try { return fn(); } finally { session.active = keep.active; session.effective = keep.effective; }
+    },
     setNow(fn) { now = fn; },
     call(name, ...args) { return vm.runInContext(name, sandbox)(...args); },
     post(obj) {
@@ -266,6 +310,39 @@ function createGasWorld(codePath) {
   };
 }
 
+// ページの中で動く、google.script.run / google.script.host のまね（ctx は 'web' か 'dialog'）
+function runShim(ctx) {
+  function runner(state) {
+    return new Proxy({}, {
+      get: function (target, name) {
+        if (name === 'withSuccessHandler') return function (fn) { return runner({ ok: fn, fail: state.fail, user: state.user }); };
+        if (name === 'withFailureHandler') return function (fn) { return runner({ ok: state.ok, fail: fn, user: state.user }); };
+        if (name === 'withUserObject') return function (o) { return runner({ ok: state.ok, fail: state.fail, user: o }); };
+        return function () {
+          var args = Array.prototype.slice.call(arguments);
+          var bad = args.some(function (a) { return a instanceof Date || typeof a === 'function' || (a && a.nodeType); });
+          var fail = function (message) { if (state.fail) state.fail(new Error(message), state.user); else console.error(message); };
+          if (bad) { setTimeout(function () { fail('mock: 日付や関数は渡せません（実物では失敗します）'); }, 0); return; }
+          fetch('/__run?ctx=' + ctx, { method: 'POST', body: JSON.stringify({ fn: String(name), args: args }) })
+            .then(function (r) { return r.json(); })
+            .then(function (res) { if (res.ok) { if (state.ok) state.ok(res.value, state.user); } else fail(res.error); },
+                  function (e) { fail('mock: つながりません ' + e); });
+        };
+      }
+    });
+  }
+  window.__host = { closed: 0, width: null, height: null };
+  window.google = { script: {
+    run: runner({}),
+    host: ctx === 'dialog' ? {
+      close: function () { window.__host.closed++; },
+      setWidth: function (w) { window.__host.width = w; },
+      setHeight: function (h) { window.__host.height = h; },
+      origin: 'https://docs.google.com'
+    } : { close: function () { throw new Error('mock: ウェブアプリでは close は使えません'); }, origin: '' }
+  } };
+}
+
 function startServer(world, port) {
   const echoes = {};
   const server = http.createServer((req, res) => {
@@ -291,6 +368,43 @@ function startServer(world, port) {
       for (const [k, v] of url.searchParams) if (k in world.control) world.control[k] = Number(v);
       return send(200, cors, JSON.stringify(world.control));
     }
+    // 管理画面のページ（HtmlService）を返す。実物は枠（iframe）の中に入れて出すが、ここではそのまま出す。
+    const sendPage = (out, ctx) => {
+      const meta = out._meta.map(m => `<meta name="${m[0]}" content="${m[1]}">`).join('');
+      const page = out._html.replace(/<script/i, () => `${meta}<script>(${runShim.toString()})(${JSON.stringify(ctx)});</script><script`);
+      setTimeout(() => send(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' }, page), world.control.delayMs || 0);
+    };
+    if (url.pathname === '/__dialog') {
+      // スプレッドシートのメニュー「管理画面を開く」を押したときに出る窓
+      world.ui._lastDialog = null;
+      world.call('menuOpenAdmin');
+      if (!world.ui._lastDialog) return send(200, { 'Content-Type': 'text/plain; charset=utf-8' }, '窓は開きませんでした: ' + JSON.stringify(world.uiLog[world.uiLog.length - 1]));
+      return sendPage(world.ui._lastDialog, 'dialog');
+    }
+    if (url.pathname === '/__run' && req.method === 'POST') {
+      // google.script.run のまね：名前で関数を呼ぶ。名前が _ で終わる関数は呼べない（実物と同じ）
+      const chunks = [];
+      req.on('data', c => chunks.push(c));
+      req.on('end', () => {
+        const reply = obj => setTimeout(() => send(200, { 'Content-Type': 'application/json' }, JSON.stringify(obj)), world.control.runDelayMs || 0);
+        let fn = '', args = [];
+        try { ({ fn, args } = JSON.parse(Buffer.concat(chunks).toString('utf8'))); } catch (e) { return reply({ ok: false, error: 'mock: 読めない呼び出し' }); }
+        world.control.runs = (world.control.runs || []).concat([[fn, args && args[1]]]);
+        if (world.control.runFail > 0) { world.control.runFail--; return reply({ ok: false, error: 'mock: 通信の失敗（テスト）' }); }
+        if (!/^[A-Za-z][A-Za-z0-9]*$/.test(String(fn))) return reply({ ok: false, error: 'mock: その名前の関数は呼べません' });
+        let f;
+        try { f = vm.runInContext('typeof ' + fn + " === 'function' ? " + fn + ' : null', world.sandbox); } catch (e) { f = null; }
+        if (!f) return reply({ ok: false, error: 'mock: 関数が見つかりません: ' + fn });
+        try {
+          const run = () => f(...(Array.isArray(args) ? args : []));
+          const value = url.searchParams.get('ctx') === 'dialog' ? run() : world.asVisitor(world.webUser, run);
+          const bad = v => v instanceof Date || typeof v === 'function' || (v && typeof v === 'object' && Object.keys(v).some(k => bad(v[k])));
+          if (bad(value)) return reply({ ok: false, error: 'mock: 日付や関数は返せません（実物では失敗します）' });
+          reply({ ok: true, value: value === undefined ? null : value });
+        } catch (e) { reply({ ok: false, error: String(e && e.message || e) }); }
+      });
+      return;
+    }
     if (url.pathname !== '/exec') return send(404, cors, 'not found');
 
     const finish = out => {
@@ -301,7 +415,8 @@ function startServer(world, port) {
       setTimeout(() => send(302, Object.assign({ Location: `http://127.0.0.1:${port}/echo?id=${id}` }, cors), ''), world.control.delayMs || 0);
     };
     if (req.method === 'GET') {
-      return finish(world.call('doGet', { parameter: Object.fromEntries(url.searchParams) }));
+      const out = world.asVisitor(world.webUser, () => world.call('doGet', { parameter: Object.fromEntries(url.searchParams) }));
+      return out._html !== undefined ? sendPage(out, 'web') : finish(out);
     }
     if (req.method === 'POST') {
       const chunks = [];
