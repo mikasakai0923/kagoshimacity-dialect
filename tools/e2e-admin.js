@@ -150,7 +150,7 @@ async function test(name, fn) {
     assert.ok(new RegExp('^集まった回答 ' + o.totals.rows + ' ?件 今日は ' + o.totals.today + '件').test(tiles[2]), tiles[2]);
     assert.ok(new RegExp('^ゴールした人 ' + o.totals.finished + ' ?人 全 ' + items.length + '問').test(tiles[3]), tiles[3]);
     assert.strictEqual(await title(page), 'ダッシュボード');
-    assert.ok(/バージョン 0\.4\.0/.test(await page.locator('.side__ver').innerText()));
+    assert.ok(/バージョン 0\.5\.0/.test(await page.locator('.side__ver').innerText()));
     await shot(page, 'home');
   });
   await test('グラフ：14日・30日・週ごとを切りかえられる。表でも見られる', async () => {
@@ -1741,6 +1741,359 @@ async function test(name, fn) {
     assert.strictEqual(await p.locator('.head__time').innerText(), at.getUTCHours() + ':' + String(at.getUTCMinutes()).padStart(2, '0') + ' の内容');
     await p.context().close();
   });
+
+  /* ============================================================ */
+  console.log('項目：直す・足す・表から取りこむ');
+  // テスト用の小さな Excel（.xlsx）を作る（zip の中に XML を入れたもの。本物の Excel と同じ形）
+  const zlib = require('zlib');
+  function crc32(buf) {
+    let c, crc = 0xFFFFFFFF;
+    for (let n = 0; n < buf.length; n++) { c = (crc ^ buf[n]) & 0xFF; for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; crc = (crc >>> 8) ^ c; }
+    return (crc ^ 0xFFFFFFFF) >>> 0;
+  }
+  function zip(files) {
+    const parts = [], central = [];
+    let offset = 0;
+    for (const [name, text] of files) {
+      const nameBuf = Buffer.from(name, 'utf8'), data = Buffer.from(text, 'utf8'), comp = zlib.deflateRawSync(data), crc = crc32(data);
+      const local = Buffer.alloc(30);
+      local.writeUInt32LE(0x04034b50, 0); local.writeUInt16LE(20, 4); local.writeUInt16LE(0x0800, 6); local.writeUInt16LE(8, 8);
+      local.writeUInt32LE(crc, 14); local.writeUInt32LE(comp.length, 18); local.writeUInt32LE(data.length, 22); local.writeUInt16LE(nameBuf.length, 26);
+      parts.push(local, nameBuf, comp);
+      const cd = Buffer.alloc(46);
+      cd.writeUInt32LE(0x02014b50, 0); cd.writeUInt16LE(20, 4); cd.writeUInt16LE(20, 6); cd.writeUInt16LE(0x0800, 8); cd.writeUInt16LE(8, 10);
+      cd.writeUInt32LE(crc, 16); cd.writeUInt32LE(comp.length, 20); cd.writeUInt32LE(data.length, 24); cd.writeUInt16LE(nameBuf.length, 28); cd.writeUInt32LE(offset, 42);
+      central.push(cd, nameBuf);
+      offset += local.length + nameBuf.length + comp.length;
+    }
+    const cdBuf = Buffer.concat(central), end = Buffer.alloc(22);
+    end.writeUInt32LE(0x06054b50, 0); end.writeUInt16LE(files.length, 8); end.writeUInt16LE(files.length, 10); end.writeUInt32LE(cdBuf.length, 12); end.writeUInt32LE(offset, 16);
+    return Buffer.concat(parts.concat([cdBuf, end]));
+  }
+  const xmlEsc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  function tinyXlsx(sheets) {
+    const colName = i => { let s = ''; i++; while (i > 0) { s = String.fromCharCode(65 + (i - 1) % 26) + s; i = Math.floor((i - 1) / 26); } return s; };
+    const sheetXml = rows => '<?xml version="1.0" encoding="UTF-8"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>' +
+      rows.map((r, ri) => '<row r="' + (ri + 1) + '">' + r.map((v, ci) => {
+        const ref = colName(ci) + (ri + 1);
+        if (v === '' || v == null) return '';
+        if (typeof v === 'number') return '<c r="' + ref + '"><v>' + v + '</v></c>';
+        if (typeof v === 'boolean') return '<c r="' + ref + '" t="b"><v>' + (v ? 1 : 0) + '</v></c>';
+        // 「本文《ふりがな》」と書いた文字は、日本語の Excel がしまう形（ふりがなの <rPh>）にする
+        const m = /^(.*)《(.*)》$/.exec(v);
+        if (m) return '<c r="' + ref + '" t="inlineStr"><is><t>' + xmlEsc(m[1]) + '</t><rPh sb="0" eb="' + m[1].length + '"><t>' + xmlEsc(m[2]) + '</t></rPh><phoneticPr fontId="1"/></is></c>';
+        return '<c r="' + ref + '" t="inlineStr"><is><t xml:space="preserve">' + xmlEsc(v) + '</t></is></c>';
+      }).join('') + '</row>').join('') + '</sheetData></worksheet>';
+    const files = [
+      ['[Content_Types].xml', '<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>' +
+        sheets.map((s, i) => '<Override PartName="/xl/worksheets/sheet' + (i + 1) + '.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>').join('') + '</Types>'],
+      ['_rels/.rels', '<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>'],
+      ['xl/workbook.xml', '<?xml version="1.0" encoding="UTF-8"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets>' +
+        sheets.map((s, i) => '<sheet name="' + xmlEsc(s.name) + '" sheetId="' + (i + 1) + '" r:id="rId' + (i + 1) + '"/>').join('') + '</sheets></workbook>'],
+      ['xl/_rels/workbook.xml.rels', '<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
+        sheets.map((s, i) => '<Relationship Id="rId' + (i + 1) + '" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet' + (i + 1) + '.xml"/>').join('') + '</Relationships>']
+    ];
+    sheets.forEach((s, i) => files.push(['xl/worksheets/sheet' + (i + 1) + '.xml', sheetXml(s.rows)]));
+    return zip(files);
+  }
+  const ITEM_HEAD = ['歩', '順', '設問ID', '種別', '提示語・例文', '場面・意味・読み', '提案例文（語彙）', '文節の区切り', 'イラスト', '出す', '記述項目', '調査の狙い'];
+  const itemSheet = () => world.sheetRows('項目');
+  const itemRowOf = id => itemSheet().find(r => r[2] === id);
+  const dialogGone = p => p.waitForFunction(() => !document.querySelector('.dialog'), null, { timeout: 15000 });
+  {
+    const page = await openAdmin();
+    await test('項目の編集：設問を直す：いまの内容が入った窓が開く。直して保存すると、一覧と「項目」シートが変わる', async () => {
+      await go(page, 'items');
+      const row = page.locator('.table--items tbody tr', { hasText: 'S004' }).first();
+      await row.locator('.textbtn', { hasText: '直す' }).click();
+      await page.waitForSelector('.dialog');
+      assert.strictEqual(await page.locator('#it-prompt').inputValue(), '雨が降っている。');
+      assert.strictEqual(await page.locator('#it-segments').inputValue(), '雨が｜降っている');
+      assert.strictEqual(await page.locator('#it-type').inputValue(), '例文');
+      const nAns = world.sheetRows('回答').slice(1).filter(r => r[col('設問ID')] === 'S004').length;
+      assert.ok(new RegExp('回答が ' + nAns + ' 件あります').test(await page.locator('.dialog .notice').innerText()), await page.locator('.dialog .notice').innerText());
+      assert.strictEqual(await page.locator('#it-id').getAttribute('readonly'), '', '回答があるので設問IDは変えられないはず');
+      await page.locator('#it-prompt').fill('雨が降っている？');
+      await page.locator('#it-context').fill('外を見て、たずねる。');
+      assert.ok(/合いません/.test(await page.locator('#it-seg-preview').innerText()) === false, '句読点のちがいでは注意を出さない');
+      await page.locator('#it-segments').fill('雨が｜降っていた');
+      assert.ok(/合いません/.test(await page.locator('#it-seg-preview').innerText()));
+      await page.locator('#it-segments').fill('雨が｜降っている');
+      await page.locator('.dialog .btn--primary').click();
+      await dialogGone(page);
+      await toast(page, /設問を保存しました/);
+      assert.ok((await page.locator('.table--items tbody tr', { hasText: 'S004' }).first().innerText()).includes('雨が降っている？'));
+      assert.strictEqual(itemRowOf('S004')[4], '雨が降っている？'); assert.strictEqual(itemRowOf('S004')[5], '外を見て、たずねる。'); assert.strictEqual(itemRowOf('S004')[7], '雨が｜降っている');
+      assert.strictEqual(itemRowOf('S004')[8], 'rain umbrella', 'さわっていない欄はそのまま');
+    });
+    await test('項目の編集：設問を直す：空の提示語・歩のまちがいは、窓の中で知らせる（閉じない・書きこまない）', async () => {
+      const row = page.locator('.table--items tbody tr', { hasText: 'S001' }).first();
+      await row.locator('.textbtn', { hasText: '直す' }).click();
+      await page.waitForSelector('.dialog');
+      await page.locator('#it-prompt').fill('');
+      await page.locator('.dialog .btn--primary').click();
+      assert.ok(/提示語・例文を入れてください/.test(await page.locator('.dialog__error').innerText()));
+      await page.locator('#it-prompt').fill('頭');
+      await page.locator('#it-step').fill('0');
+      await page.locator('.dialog .btn--primary').click();
+      assert.ok(/1〜999/.test(await page.locator('.dialog__error').innerText()));
+      assert.strictEqual(await page.locator('.dialog').count(), 1);
+      await page.keyboard.press('Escape');
+      await dialogGone(page);
+      assert.strictEqual(itemRowOf('S001')[4], '頭');
+    });
+    await test('項目の編集：出さない：確かめてから、参加者の画面に出なくなる。「出していない設問」に移り、「出す」でもどせる', async () => {
+      const row = page.locator('.table--items tbody tr', { hasText: 'S003' }).first();
+      await row.locator('.textbtn', { hasText: '出さない' }).click();
+      await page.waitForSelector('.dialog');
+      const n3 = world.sheetRows('回答').slice(1).filter(r => r[col('設問ID')] === 'S003').length;
+      assert.ok(new RegExp('回答（' + n3 + ' 件）は残ります').test(await page.locator('.dialog').innerText()), await page.locator('.dialog').innerText());
+      await page.locator('.dialog .btn--danger').click();
+      await dialogGone(page);
+      await toast(page, /出さないようにしました/);
+      await page.waitForSelector('.hiddenbox');
+      assert.strictEqual(itemRowOf('S003')[9], false);
+      assert.ok(!world.call('ksReadItems_').some(i => i.id === 'S003'), '参加者の画面に、まだ出ている');
+      assert.ok(/出していない設問（1）/.test(await page.locator('.hiddenbox summary').innerText()));
+      await page.locator('.hiddenbox summary').click();
+      const hrow = page.locator('.hiddenbox tbody tr', { hasText: 'S003' });
+      assert.ok((await hrow.innerText()).includes(n3 + '件'));
+      await hrow.locator('.textbtn', { hasText: '出す' }).click();
+      await toast(page, /出すようにしました/);
+      await page.waitForFunction(() => !document.querySelector('.hiddenbox'));
+      assert.strictEqual(itemRowOf('S003')[9], true);
+      assert.ok(world.call('ksReadItems_').some(i => i.id === 'S003'));
+    });
+    await test('項目の編集：歩の名前を直す：マスの名前とアイコンが変わる', async () => {
+      await page.locator('.stephead', { hasText: '2歩目' }).locator('.textbtn').click();
+      await page.waitForSelector('.dialog');
+      assert.strictEqual(await page.locator('#step-title').inputValue(), '桜島');
+      await page.locator('#step-title').fill('桜島フェリー');
+      await page.locator('#step-icon').fill('ferry');
+      await page.locator('.dialog .btn--primary').click();
+      await dialogGone(page);
+      await toast(page, /2歩目の名前を保存しました/);
+      assert.ok(/2歩目 桜島フェリー/.test(await page.locator('.stephead').nth(1).innerText()));
+      assert.strictEqual(JSON.stringify(world.sheetRows('歩')[2]), JSON.stringify([2, '桜島フェリー', 'ferry']));
+      // アイコンは半角の英数字だけ
+      await page.locator('.stephead', { hasText: '2歩目' }).locator('.textbtn').click();
+      await page.locator('#step-icon').fill('船');
+      await page.locator('.dialog .btn--primary').click();
+      assert.ok(/半角の英数字/.test(await page.locator('.dialog__error').innerText()));
+      await page.keyboard.press('Escape');
+      await dialogGone(page);
+    });
+    await test('項目の編集：設問を足す：新しい設問が、その歩の最後に入る', async () => {
+      await page.locator('#item-add').click();
+      await page.waitForSelector('.dialog');
+      assert.strictEqual(await page.locator('#it-id').inputValue(), '');
+      await page.locator('.dialog .btn--primary').click();
+      assert.ok(/設問IDを入れてください/.test(await page.locator('.dialog__error').innerText()));
+      await page.locator('#it-id').fill('S006');
+      await page.locator('#it-type').selectOption('例文');
+      await page.locator('#it-prompt').fill('犬が走る。');
+      await page.locator('#it-segments').fill('犬が｜走る');
+      await page.locator('#it-step').fill('2');
+      await page.locator('#it-order').fill('');
+      await page.locator('.dialog .btn--primary').click();
+      await dialogGone(page);
+      await toast(page, /設問「犬が走る。」を足しました/);
+      const rows = await page.locator('.table--items tbody tr').allInnerTexts();
+      assert.ok(/S006/.test(rows[rows.length - 1]), '最後の行に出るはず: ' + rows[rows.length - 1]);
+      const r = itemRowOf('S006');
+      assert.deepStrictEqual([r[0], r[1], r[3], r[4], r[7], r[9]], [2, 3, '例文', '犬が走る。', '犬が｜走る', true]);
+      assert.ok(world.call('ksReadItems_').some(i => i.id === 'S006'));
+    });
+    await test('項目の編集：表から取りこむ（貼りつけ）：直すところがあれば取りこめない。直してから下見すると、ちがいが出て、取りこめる', async () => {
+      await go(page, 'items');
+      await page.locator('#item-import').click();
+      await page.waitForSelector('#import-text');
+      assert.ok(/表から取りこむ/.test(await page.locator('.head__title').innerText()));
+      assert.strictEqual(await page.locator('.nav [aria-current="page"]').getAttribute('data-view'), 'items');
+      assert.strictEqual(await page.locator('#import-check').isDisabled(), true);
+      const bad = [ITEM_HEAD.join('\t'), ['3', '1', 'P001', '語彙', '鼻', '読み：はな', '', '', '', 'TRUE', '', ''].join('\t'), ['3', '2', 'P001', '例文', '"鼻が\n高い。"', '', '', '鼻が｜高い', '', 'TRUE', '', ''].join('\t')].join('\n');
+      await page.locator('#import-text').fill(bad);
+      assert.ok(/貼りつけた表：2 行/.test(await page.locator('#import-parsed').innerText()), await page.locator('#import-parsed').innerText());
+      await page.locator('.mode', { hasText: '足す・直すだけ' }).click();
+      await page.locator('#import-check').click();
+      await page.waitForSelector('#plan');
+      assert.ok(/取りこめません/.test(await page.locator('#plan-title').innerText()));
+      assert.ok(/2 行目にもあります/.test(await page.locator('#plan').innerText()), await page.locator('#plan').innerText());
+      assert.strictEqual(await page.locator('#import-apply').isDisabled(), true);
+      const good = bad.replace('\t2\tP001\t', '\t2\tP002\t');
+      await page.locator('#import-text').fill(good);
+      await page.locator('#import-check').click();
+      await page.waitForFunction(() => /このように変わります/.test((document.getElementById('plan-title') || {}).textContent || ''));
+      const text = (await page.locator('#plan').innerText()).replace(/\s+/g, ' ');
+      assert.ok(/新しく足す 2 件/.test(text) && /直す 0 件/.test(text) && /消す 0 件/.test(text), text.slice(0, 300));
+      assert.strictEqual(await page.locator('#import-apply').isDisabled(), false);
+      await page.locator('#import-apply').click();
+      await page.waitForFunction(() => document.querySelector('.head__title') && document.querySelector('.head__title').textContent === '項目', null, { timeout: 20000 });
+      await toast(page, /2 件を取りこみました/);
+      assert.ok(itemRowOf('P001') && itemRowOf('P002'), '貼りつけた設問がシートに入っていない');
+      assert.strictEqual(itemRowOf('P002')[4], '鼻が\n高い。', '「"…"」の中の改行が読めていない');
+      assert.ok(itemRowOf('S001') && itemRowOf('S006'), '「足す・直すだけ」なのに、前の設問が消えた');
+      assert.ok(/3歩目/.test(await page.locator('.stephead').nth(2).innerText()));
+      assert.ok(world.ss.getSheets().some(s => /^項目（控え /.test(s.getName())), '控えがとられていない');
+      assert.ok(/いちばん新しい控え：項目（控え /.test(await page.locator('.notice').first().innerText()));
+    });
+    await test('項目の編集：表から取りこむ（Excel）：「項目」と「歩」のシートを読む。ぜんぶ入れかえると、回答のある設問は「出さない」で残る', async () => {
+      const items = [ITEM_HEAD,
+        [1, 1, 'X001', '語彙', '木', '読み：き', '', '', 'tree', true, '', ''],
+        [1, 2, 'X002', '例文', '木が見える。', '', '', '木が｜見える', '', true, '', ''],
+        [2, 1, 'X003', '例文', '火が見える。《ヒガミエル》', '', '', '火が｜見える', '', true, '', ''],
+        [2, 2, 'S001', '語彙', '頭', '読み：あたま', '', '', 'head', true, '', '前からある設問']];
+      const steps = [['歩', 'タイトル', 'アイコン'], [1, '木の歩', 'tree'], [2, '火の歩', 'fire']];
+      const buf = tinyXlsx([{ name: '歩', rows: steps }, { name: '項目', rows: items }]);
+      await go(page, 'items');
+      await page.locator('#item-import').click();
+      await page.waitForSelector('#import-file');
+      await page.setInputFiles('#import-file', { name: 'bassui.xlsx', mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', buffer: buf });
+      await page.waitForFunction(() => /「bassui.xlsx」：4 行/.test((document.getElementById('import-parsed') || {}).textContent || ''), null, { timeout: 10000 });
+      assert.ok(/歩の表：2 行/.test(await page.locator('#import-parsed').innerText()));
+      assert.ok(await page.locator('.mode', { hasText: 'ぜんぶ入れかえる' }).locator('input').isChecked());
+      await page.locator('#import-check').click();
+      await page.waitForSelector('#plan');
+      const text = (await page.locator('#plan').innerText()).replace(/\s+/g, ' ');
+      assert.ok(/新しく足す 3 件/.test(text) && /直す 1 件/.test(text), text.slice(0, 400));
+      assert.ok(/消す 7 件/.test(text), text.slice(0, 400));
+      assert.ok(/回答のある 4 件は消さずに/.test(text), text);
+      assert.ok(/1歩目「木の歩」/.test(text));
+      await page.locator('#import-apply').click();
+      await page.waitForSelector('.dialog');
+      assert.ok(/7 件の設問が一覧から消えます/.test(await page.locator('.dialog').innerText()));
+      await page.locator('.dialog .btn', { hasText: 'やめる' }).click();
+      await dialogGone(page);
+      assert.ok(!itemRowOf('X001'), 'やめたのに書きこまれた');
+      await page.locator('#import-apply').click();
+      await page.waitForSelector('.dialog');
+      await page.locator('.dialog .btn--danger').click();
+      await page.waitForFunction(() => document.querySelector('.head__title') && document.querySelector('.head__title').textContent === '項目', null, { timeout: 20000 });
+      await toast(page, /4 件を取りこみました（回答のある 4 件は「出さない」にして残しました）/);
+      const stepRows = world.sheetRows('歩').slice(1).filter(r => r.some(v => v !== ''));
+      assert.strictEqual(JSON.stringify(stepRows.filter(r => r[0] === 1 || r[0] === 2)), JSON.stringify([[1, '木の歩', 'tree'], [2, '火の歩', 'fire']]));
+      assert.ok(stepRows.some(r => r[0] === 3), '項目で使わなくなった歩の行も、消さずに残す');
+      const shown = world.call('ksReadItems_').map(i => i.id);
+      assert.strictEqual(JSON.stringify(shown), JSON.stringify(['X001', 'X002', 'X003', 'S001']));
+      assert.strictEqual(itemRowOf('S001')[11], '前からある設問');
+      assert.strictEqual(itemRowOf('X003')[4], '火が見える。', 'Excel のふりがな（rPh）が本文に入ってしまった');
+      assert.strictEqual(itemRowOf('S002')[9], false, '回答のある S002 は出さないで残るはず');
+      assert.ok(!itemRowOf('P001'), '回答のない P001 は消えるはず');
+      assert.ok(/1歩目 木の歩/.test(await page.locator('.stephead').first().innerText()));
+      await page.locator('.hiddenbox summary').click();
+      assert.strictEqual(await page.locator('.hiddenbox tbody tr').count(), 4);
+      await shot(page, 'items-after-import');
+    });
+    await test('項目の編集：表から取りこむ（CSV）：Excel が書き出す Shift_JIS の CSV も読める（「"…"」の中のカンマも）', async () => {
+      const buf = fs.readFileSync(path.join(__dirname, 'fixtures', 'items-sjis.csv'));
+      await go(page, 'items');
+      await page.locator('#item-import').click();
+      await page.waitForSelector('#import-file');
+      await page.setInputFiles('#import-file', { name: 'items-sjis.csv', mimeType: 'text/csv', buffer: buf });
+      await page.waitForFunction(() => /「items-sjis.csv」：2 行/.test((document.getElementById('import-parsed') || {}).textContent || ''), null, { timeout: 10000 });
+      assert.ok(/見出し：歩、順、設問ID、種別、提示語・例文、場面・意味・読み/.test(await page.locator('#import-parsed').innerText()), await page.locator('#import-parsed').innerText());
+      await page.locator('.mode', { hasText: '足す・直すだけ' }).click();
+      await page.locator('#import-check').click();
+      await page.waitForSelector('#plan');
+      const text = (await page.locator('#plan').innerText()).replace(/\s+/g, ' ');
+      assert.ok(/新しく足す 2 件/.test(text) && /消す 0 件/.test(text), text.slice(0, 300));
+      await page.locator('#import-apply').click();
+      await page.waitForFunction(() => document.querySelector('.head__title') && document.querySelector('.head__title').textContent === '項目', null, { timeout: 20000 });
+      await toast(page, /2 件を取りこみました/);
+      const r = itemRowOf('CSV02');
+      assert.ok(r, 'CSV の設問が入っていない');
+      assert.strictEqual(r[4], '雨が降って、畑に行けない。'); assert.strictEqual(r[5], '「行けない」と言うとき'); assert.strictEqual(r[7], '雨が｜降って｜畑に｜行けない'); assert.strictEqual(r[9], true);
+      assert.strictEqual(itemRowOf('CSV01')[6], '鍬で畑を耕す。');
+    });
+    await test('項目の編集：下見のあとに表を直すと、古い下見は消える。小文字の設問IDは、直しても大文字にならない', async () => {
+      await go(page, 'items');
+      await page.locator('#item-import').click();
+      await page.waitForSelector('#import-text');
+      const pasted = ITEM_HEAD.join('\t') + '\n' + ['1', '8', 'kago02', '語彙', '小文字の設問', '', '', '', '', 'TRUE', '', ''].join('\t');
+      await page.locator('#import-text').fill(pasted);
+      await page.locator('.mode', { hasText: '足す・直すだけ' }).click();
+      await page.locator('#import-check').click();
+      await page.waitForSelector('#plan');
+      await page.locator('#import-text').fill(pasted + '\n');
+      assert.strictEqual(await page.locator('#plan').count(), 0, '表を直したのに、古い下見が残っている');
+      await page.locator('#import-check').click();
+      await page.waitForSelector('#plan');
+      await page.locator('#import-apply').click();
+      await page.waitForFunction(() => document.querySelector('.head__title') && document.querySelector('.head__title').textContent === '項目', null, { timeout: 20000 });
+      await toast(page, /1 件を取りこみました/);
+      assert.ok(itemRowOf('kago02'), '小文字の設問IDが、そのまま入っていない');
+      // 回答のある小文字の設問：直しても「設問IDは変えられません」にならない
+      const r0 = world.sheetRows('回答')[0].map(() => '');
+      r0[col('送信日時')] = new Date(Date.now() - 3600000); r0[col('参加者ナンバー')] = made.people[0].id; r0[col('歩')] = 1; r0[col('設問ID')] = 'kago02'; r0[col('種別')] = '語彙';
+      r0[col('提示語・例文')] = '小文字の設問'; r0[col('回答の状態')] = '回答済'; r0[col('回答（地域の言葉）')] = 'こもじ'; r0[col('送信ID')] = 'low-000001';
+      answers.appendRow(r0);
+      await page.locator('#refresh').click();
+      await page.waitForFunction(() => { const b = document.querySelector('[data-fk="edit:kago02"]'); return !!b && !b.disabled; }, null, { timeout: 10000 });
+      await page.waitForTimeout(400);
+      await page.locator('[data-fk="edit:kago02"]').click();
+      await page.waitForSelector('#it-prompt');
+      assert.strictEqual(await page.locator('#it-id').getAttribute('readonly'), '', '回答があるので、設問IDの欄は変えられないはず');
+      await page.locator('#it-context').fill('読み：こもじ');
+      await page.locator('.dialog .btn--primary').click();
+      await dialogGone(page);
+      await toast(page, /設問を保存しました/);
+      assert.strictEqual(itemRowOf('kago02')[5], '読み：こもじ');
+      assert.ok(!itemRowOf('KAGO02'), '設問IDが大文字になってしまった');
+      // 回答のない設問も、小文字のまま
+      await page.locator('[data-fk="edit:X002"]').click();
+      await page.waitForSelector('#it-id');
+      await page.locator('#it-id').fill('x002b');
+      await page.locator('.dialog .btn--primary').click();
+      await dialogGone(page);
+      await toast(page, /設問を保存しました/);
+      assert.ok(itemRowOf('x002b') && !itemRowOf('X002B'), '設問IDが大文字になってしまった');
+    });
+    await test('項目の編集：控えからもどすと、取りこむ前の設問にもどる（もどす前の控えもとられる）', async () => {
+      await go(page, 'items');
+      const beforeIds = world.call('ksReadItems_').map(i => i.id).join(',');
+      const stampBefore = admin('overview').backups[0];
+      await page.locator('#item-import').click();
+      await page.waitForSelector('#import-text');
+      await page.locator('#import-text').fill(ITEM_HEAD.join('\t') + '\n' + ['1', '1', 'R001', '語彙', 'もどす前', '', '', '', '', 'TRUE', '', ''].join('\t'));
+      await page.locator('.mode', { hasText: 'ぜんぶ入れかえる' }).click();
+      await page.locator('#import-check').click();
+      await page.waitForSelector('#plan');
+      await page.locator('#import-apply').click();
+      await page.waitForSelector('.dialog');
+      await page.locator('.dialog .btn--danger').click();
+      await page.waitForFunction(() => document.querySelector('.head__title') && document.querySelector('.head__title').textContent === '項目', null, { timeout: 20000 });
+      await toast(page, /1 件を取りこみました/);
+      assert.strictEqual(world.call('ksReadItems_').map(i => i.id).join(','), 'R001');
+      const stampNow = admin('overview').backups[0];
+      assert.notStrictEqual(stampNow, stampBefore, '取りこみで控えがとられていない');
+      await page.locator('#item-restore').click();
+      await page.waitForSelector('#restore-pick');
+      assert.strictEqual(await page.locator('#restore-pick').inputValue(), stampNow, 'いちばん新しい控えがえらばれているはず');
+      await page.locator('.dialog .btn--danger').click();
+      await dialogGone(page);
+      await toast(page, /にもどしました/);
+      assert.strictEqual(world.call('ksReadItems_').map(i => i.id).join(','), beforeIds, 'もどっていない');
+      assert.ok(!/R001/.test(await page.locator('#view').innerText()), '画面が古いまま');
+      assert.ok(admin('overview').backups.length >= 2 && admin('overview').backups[0] !== stampNow, 'もどす前の控えがとられていない');
+    });
+    await test('項目の編集：取りこむとちゅうで時間切れになっても、貼りつけた表は画面に残る（写しをとれる）', async () => {
+      await go(page, 'items');
+      await page.locator('#item-import').click();
+      await page.waitForSelector('#import-text');
+      const pasted = ITEM_HEAD.join('\t') + '\n' + ['1', '1', 'Z001', '語彙', '石', '', '', '', '', 'TRUE', '', ''].join('\t');
+      await page.locator('#import-text').fill(pasted);
+      const keep = world.props.TOKEN_SECRET;
+      world.props.TOKEN_SECRET = 'changed-' + keep;
+      try {
+        await page.locator('#import-check').click();
+        await page.waitForSelector('.screen__title:has-text("開き直してください")');
+        assert.strictEqual(await page.locator('#rescue-0').inputValue(), pasted);
+      } finally {
+        world.props.TOKEN_SECRET = keep;
+      }
+      await page.context().close();
+    });
+  }
 
   console.log('まだ何もないとき');
   await test('参加者も回答もないときは、次にすることの案内が出る', async () => {

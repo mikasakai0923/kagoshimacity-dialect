@@ -79,14 +79,14 @@ test('持ち主が ?admin=1 で開くと、管理画面が出る', () => {
   const m = /var KS_BOOT = (\{[^\n]*?\});<\/script>/.exec(page);
   assert.ok(m, 'はじめの情報が見つからない');
   const boot = JSON.parse(m[1]);
-  assert.strictEqual(boot.mode, 'web'); assert.strictEqual(boot.version, '0.4.0'); assert.strictEqual(boot.hours, 12);
+  assert.strictEqual(boot.mode, 'web'); assert.strictEqual(boot.version, '0.5.0'); assert.strictEqual(boot.hours, 12);
   assert.strictEqual(admin('overview', {}, boot.token).ok, true);
   assert.ok(openAsWeb('OWNER@Example.com')._html, 'メールアドレスの大文字・小文字のちがいで開けない');
   assert.ok(openAsWeb(w.OWNER, { admin: '' })._html, '?admin だけでも開ける');
 });
 test('?admin を付けないときは、これまでどおり動作確認の返事をする', () => {
   const r = JSON.parse(openAsWeb('', {}).getContent());
-  assert.strictEqual(r.ok, true); assert.strictEqual(r.ready, true); assert.strictEqual(r.version, '0.4.0');
+  assert.strictEqual(r.ok, true); assert.strictEqual(r.ready, true); assert.strictEqual(r.version, '0.5.0');
   assert.ok(!/adm1\./.test(JSON.stringify(r)));
 });
 test('メニューから開くと、大きな窓で管理画面が出る', () => {
@@ -769,6 +769,471 @@ test('プログラムを新しくしたとき：前からある「設定」シ�
   assert.ok(/サイトのURL/.test(msg));
   assert.strictEqual(setting('サイトのURL'), '');
   assert.strictEqual(admin('saveSettings', { values: { 'サイトのURL': 'https://example.github.io/site/' } }).settings.siteUrl, 'https://example.github.io/site/');
+});
+
+console.log('項目：表から取りこむ・直す・足す');
+const itemHead = () => w.sheetRows('項目')[0];
+const itemRows = () => w.sheetRows('項目').slice(1).filter(r => r.some(v => v !== '' && v != null));
+const itemById = id => itemRows().find(r => r[itemHead().indexOf('設問ID')] === id);
+const ITEM_HEAD = ['歩', '順', '設問ID', '種別', '提示語・例文', '場面・意味・読み', '提案例文（語彙）', '文節の区切り', 'イラスト', '出す', '記述項目', '調査の狙い'];
+const row = (step, order, id, type, prompt, context, example, segs, show) => [step, order, id, type, prompt, context || '', example || '', segs || '', '', show === undefined ? true : show, '', ''];
+const answersOf = id => w.sheetRows('回答').slice(1).filter(r => r[col('設問ID')] === id).length;
+let kept5 = [];
+test('全体のようす：出さない設問も、設問ごとの回答の数も、歩の表も、控えの一覧も渡す', () => {
+  const o = admin('overview');
+  assert.ok(Array.isArray(o.stepRows) && o.stepRows.length === 2 && o.stepRows[0].title === '鹿児島中央駅');
+  assert.deepStrictEqual(o.backups, []);
+  assert.strictEqual(o.limits.items, 2000);
+  const s1 = o.items.find(i => i.id === 'S001');
+  assert.strictEqual(s1.hidden, false); assert.strictEqual(s1.answers, answersOf('S001')); assert.ok(s1.rowNo >= 2);
+});
+test('下見：見出しの足りない表・空の表はことわる（何も書きこまない）', () => {
+  const before = JSON.stringify(w.sheetRows('項目'));
+  let r = admin('checkItems', { head: ['歩', '設問ID'], rows: [[1, 'X']], mode: 'replace' });
+  assert.strictEqual(r.ok, true); assert.strictEqual(r.plan.ok, false);
+  assert.ok(/「提示語・例文」/.test(r.plan.errors[0]), r.plan.errors[0]);
+  r = admin('checkItems', { head: [], rows: [], mode: 'replace' });
+  assert.strictEqual(r.plan.ok, false); assert.ok(/空です/.test(r.plan.errors[0]));
+  r = admin('importItems', { head: ['歩', '設問ID'], rows: [[1, 'X']], mode: 'replace', confirm: true });
+  assert.strictEqual(r.error, 'invalid');
+  assert.strictEqual(JSON.stringify(w.sheetRows('項目')), before);
+});
+test('下見：行ごとの直すところ（空のID・同じID・歩が数字でない・長すぎる文・種別のまちがい）を、行番号つきで返す', () => {
+  const rows = [
+    row(1, 1, '', '語彙', '頭'),
+    row(1, 2, 'A1', '例文', '頭が痛い。', '', '', '頭が｜痛い'),
+    row('x', 3, 'A2', '語彙', '目'),
+    row(1, 4, 'A1', '語彙', '鼻'),
+    row(1, 5, 'A3', 'ことば', '口'),
+    row(1, 6, 'A4', '語彙', 'あ'.repeat(301)),
+    row(1, 7, 'A5', '語彙', '耳', '', '', '', 'たぶん')
+  ];
+  const r = admin('checkItems', { head: ITEM_HEAD, rows, mode: 'replace' });
+  assert.strictEqual(r.plan.ok, false);
+  const at = n => r.plan.rowErrors.find(e => e.row === n);
+  assert.ok(/設問IDが空/.test(at(2).messages[0]));
+  assert.ok(/「歩」は 1〜999/.test(at(4).messages[0]));
+  assert.ok(/3 行目にもあります/.test(at(5).messages[0]), at(5).messages[0]);
+  assert.ok(/「語彙」か「例文」/.test(at(6).messages[0]));
+  assert.ok(/長すぎます（301 文字/.test(at(7).messages[0]));
+  assert.strictEqual(at(3), undefined); assert.strictEqual(at(8), undefined);
+  assert.ok(r.plan.rowWarnings.some(x => x.row === 8 && /「出す」の「たぶん」/.test(x.messages[0])));
+  assert.ok(/6 行に/.test(r.plan.errors[0]) || r.plan.errors.some(e => /行に/.test(e)));
+});
+test('下見：見出しが半角の括弧でも読む。知らない列は使わない。文節と文が合わないときは注意', () => {
+  const head = ITEM_HEAD.map(h => h.replace('（語彙）', '(語彙)')).concat(['メモ']);
+  const rows = [row(1, 1, 'B1', '例文', '雨が降っている。', '', '', '雨が｜ふっている').concat(['x'])];
+  const r = admin('checkItems', { head, rows, mode: 'replace' });
+  assert.strictEqual(r.plan.ok, true);
+  assert.ok(r.plan.head.used.indexOf('提案例文（語彙）') >= 0);
+  assert.deepStrictEqual(r.plan.head.unused, ['メモ']);
+  assert.ok(r.plan.rowWarnings.some(x => /合いません/.test(x.messages[0])));
+});
+test('下見：ちがい（足す・直す・消す）と、回答のある設問への注意を出す', () => {
+  const cur = itemRows();
+  const rows = cur.map(r => r.slice());
+  rows[0][4] = '頭（あたま）';                               // S001 の提示語を変える（回答あり）
+  rows[2][6] = '';                                          // S003 の提案例文を消す
+  rows.splice(4, 1);                                        // S005 を消す（回答あり）
+  rows.push(row(3, 1, 'N001', '語彙', '新しい語'));
+  const r = admin('checkItems', { head: itemHead(), rows, mode: 'replace', steps: [[3, '三歩目', 'tree']] });
+  assert.strictEqual(r.plan.ok, true);
+  const d = r.plan.diff;
+  assert.deepStrictEqual(d.added.map(a => a.id), ['N001']);
+  assert.deepStrictEqual(d.changed.map(c => [c.id, c.fields.join(','), c.big]), [['S001', '提示語・例文', true], ['S003', '提案例文（語彙）', false]]);
+  assert.deepStrictEqual(d.removed.map(x => [x.id, x.kept]), [['S005', true]]);
+  assert.strictEqual(d.unchanged, 2);
+  assert.strictEqual(r.plan.counts.answersTouched, answersOf('S001'));
+  assert.ok(r.plan.warnings.some(x => /回答のある設問の、提示語/.test(x)));
+  assert.ok(r.plan.warnings.some(x => /回答のある 1 件は消さずに/.test(x)));
+  assert.deepStrictEqual(r.plan.steps, [{ no: 3, title: '三歩目', icon: 'tree' }]);
+  assert.strictEqual(r.plan.items, undefined, '下見では、表そのものは返さない');
+  // 「足す・直すだけ」なら消えない
+  const m = admin('checkItems', { head: itemHead(), rows, mode: 'merge' });
+  assert.deepStrictEqual(m.plan.diff.removed, []);
+});
+test('取りこむ（ぜんぶ入れかえる）：控えをとり、表のとおりに書き、回答のある設問は「出さない」で残す。歩の名前も入る', () => {
+  const cur = itemRows();
+  const rows = cur.map(r => r.slice());
+  rows[0][4] = '頭（あたま）';
+  rows.splice(4, 1);
+  rows.push(row(3, 1, 'N001', '語彙', '新しい語', '読み：あたらしいご'));
+  const nSheets = w.ss.getSheets().length;
+  assert.strictEqual(admin('importItems', { head: itemHead(), rows, mode: 'replace', steps: [[3, '三歩目', 'tree']] }).error, 'bad_request', 'confirm なしでは書かない');
+  const r = admin('importItems', { head: itemHead(), rows, mode: 'replace', steps: [[3, '三歩目', 'tree']], confirm: true });
+  assert.strictEqual(r.ok, true, JSON.stringify(r));
+  assert.strictEqual(r.written, 5); assert.strictEqual(r.hiddenKept, 1);
+  assert.strictEqual(r.backups.length, 2);
+  assert.ok(/^項目（控え 2026-10-12 14:00）$/.test(r.backups[0]), r.backups[0]);
+  assert.strictEqual(w.ss.getSheets().length, nSheets + 2);
+  const bk = w.sheetRows(r.backups[0]);
+  assert.strictEqual(bk.length, 6); assert.strictEqual(String(bk[1][4]), '頭', '控えは前の内容');
+  const now = itemRows();
+  assert.strictEqual(now.length, 6);
+  assert.strictEqual(now[0][4], '頭（あたま）');
+  assert.strictEqual(now[4][2], 'N001'); assert.strictEqual(now[4][0], 3);
+  assert.deepStrictEqual([now[5][2], now[5][9]], ['S005', false], '回答のある S005 は出さないで残る');
+  assert.strictEqual(JSON.stringify(w.sheetRows('歩').slice(1)), JSON.stringify([[1, '鹿児島中央駅', 'station'], [2, '桜島', 'volcano'], [3, '三歩目', 'tree']]));
+  // 参加者の画面には、出す設問だけが届く
+  const items = w.call('ksReadItems_');
+  assert.strictEqual(JSON.stringify(items.map(i => i.id)), JSON.stringify(['S001', 'S002', 'S003', 'S004', 'N001']));
+  const o = admin('overview');
+  assert.strictEqual(o.items.find(i => i.id === 'S005').hidden, true);
+  assert.strictEqual(o.items.find(i => i.id === 'S005').answers, answersOf('S005'));
+  assert.deepStrictEqual(o.backups, [r.backups[0].replace(/^項目（控え (.+)）$/, '$1')]);
+  assert.strictEqual(o.steps.length, 3);
+});
+test('取りこむ（足す・直すだけ）：表にない設問はそのまま。調査者が足した列も残る', () => {
+  const sh = sheet('項目');
+  sh.getRange(1, 13).setValue('わたしのメモ');
+  sh.getRange(2, 13).setValue('S001 のメモ');
+  const r = admin('importItems', { head: ITEM_HEAD, rows: [row(1, 1, 'S001', '語彙', '頭', '読み：あたま'), row(3, 2, 'N002', '例文', '新しい文。', '', '', '新しい｜文')], mode: 'merge', confirm: true });
+  assert.strictEqual(r.ok, true, JSON.stringify(r));
+  assert.strictEqual(r.written, 2);
+  const now = itemRows();
+  assert.strictEqual(now.length, 7);
+  assert.strictEqual(now[0][4], '頭'); assert.strictEqual(now[0][12], 'S001 のメモ', '足した列は残る');
+  assert.strictEqual(now[6][2], 'N002');
+  assert.strictEqual(JSON.stringify(w.call('ksReadItems_').map(i => i.id)), JSON.stringify(['S001', 'S002', 'S003', 'S004', 'N001', 'N002']));
+  sh.getRange(1, 13).setValue(''); sh.getRange(2, 13).setValue('');
+});
+test('取りこむ：順が空なら表の順になる。設問IDの前後の空白・全角は、そろえる', () => {
+  const r = admin('importItems', { head: ['歩', '設問ID', '提示語・例文'], rows: [[4, ' Ｃ１ ', 'いち'], [4, 'C2', 'に'], [4, 'C3', 'さん']], mode: 'merge', confirm: true });
+  assert.strictEqual(r.ok, true, JSON.stringify(r));
+  const got = w.call('ksReadItems_').filter(i => i.step === 4);
+  assert.strictEqual(JSON.stringify(got.map(i => [i.id, i.order, i.type])), JSON.stringify([['C1', 1, '語彙'], ['C2', 2, '語彙'], ['C3', 3, '語彙']]));
+  assert.strictEqual(JSON.stringify(w.sheetRows('歩').slice(1).map(x => x[0])), JSON.stringify([1, 2, 3, 4]), '歩の行が足される');
+});
+test('同じ分に2回取りこんでも、2回目の控えは秒つきの名前でとられる（前の控えは消えない）', () => {
+  clock = Math.ceil(clock / 60000) * 60000 + 120000 + 10000;         // まっさらな分の 10 秒
+  const r1 = admin('importItems', { head: ITEM_HEAD, rows: [row(1, 1, 'S001', '語彙', '頭', '読み：あたま')], mode: 'merge', confirm: true });
+  clock += 30000;
+  const r2 = admin('importItems', { head: ITEM_HEAD, rows: [row(1, 1, 'S001', '語彙', '頭', '読み：あたま（2回目）')], mode: 'merge', confirm: true });
+  assert.strictEqual(r1.ok && r2.ok, true, JSON.stringify([r1, r2]));
+  assert.ok(/^項目（控え 2026-10-12 \d\d:\d\d）$/.test(r1.backups[0]), r1.backups[0]);
+  assert.ok(/^項目（控え 2026-10-12 \d\d:\d\d:40）$/.test(r2.backups[0]), r2.backups[0]);
+  const names = w.ss.getSheets().map(s => s.getName());
+  assert.ok(names.indexOf(r1.backups[0]) >= 0 && names.indexOf(r2.backups[0]) >= 0, names.join(' / '));
+  const second = w.ss.getSheetByName(r2.backups[0]);
+  assert.strictEqual(String(second.getRange(2, 6).getValue()), '読み：あたま', '2回目の控えには、1回目の取りこみのあとの内容が入る');
+});
+test('控えは、決まった数だけ残して、古いものから消える', () => {
+  const names = () => w.ss.getSheets().map(s => s.getName()).filter(n => /^項目（控え/.test(n));
+  for (let i = 0; i < 6; i++) {
+    clock += 60000;
+    const r = admin('importItems', { head: ITEM_HEAD, rows: [row(1, 1, 'S001', '語彙', '頭', '読み：あたま')], mode: 'merge', confirm: true });
+    assert.strictEqual(r.ok, true);
+  }
+  kept5 = names();
+  assert.strictEqual(kept5.length, 5, kept5.join(' / '));
+  assert.strictEqual(w.ss.getSheets().map(s => s.getName()).filter(n => /^歩（控え/.test(n)).length, 5);
+  assert.strictEqual(admin('overview').backups.length, 5);
+});
+test('設問を直す：送った欄だけ変わる。長すぎる文・歩のまちがいはことわる', () => {
+  const r = admin('setItem', { id: 'S002', fields: { prompt: '頭が痛い！', segments: '頭が｜痛い', context: '痛いとき' } });
+  assert.strictEqual(r.ok, true, JSON.stringify(r));
+  assert.deepStrictEqual([r.item.prompt, r.item.context, r.item.segments, r.item.hidden, r.item.answers], ['頭が痛い！', '痛いとき', ['頭が', '痛い'], false, answersOf('S002')]);
+  const sr = itemById('S002');
+  assert.strictEqual(sr[4], '頭が痛い！'); assert.strictEqual(sr[5], '痛いとき'); assert.strictEqual(sr[8], 'head', 'さわっていない欄はそのまま');
+  assert.strictEqual(admin('setItem', { id: 'S002', fields: { prompt: 'あ'.repeat(301) } }).error, 'invalid');
+  assert.strictEqual(admin('setItem', { id: 'S002', fields: { step: 0 } }).error, 'invalid');
+  assert.strictEqual(admin('setItem', { id: 'S002', fields: { prompt: '' } }).error, 'invalid');
+  assert.strictEqual(admin('setItem', { id: 'NAI', fields: { prompt: 'x' } }).error, 'not_found');
+  assert.strictEqual(itemById('S002')[4], '頭が痛い！', 'ことわったときは書きかえない');
+});
+test('設問を直す：「=」で始まる文も数式にならない。ふりがなは残る', () => {
+  const r = admin('setItem', { id: 'S003', fields: { prompt: '=目《め》', example: '+目が大きい。' } });
+  assert.strictEqual(r.ok, true);
+  assert.strictEqual(r.item.prompt, '=目《め》');
+  assert.strictEqual(w.ss.getSheetByName('項目').formulas.length, 0, '数式として入ってしまった');
+  assert.strictEqual(w.call('ksReadItems_').find(i => i.id === 'S003').prompt, '=目《め》');
+});
+test('出さない・出す：回答は残る。参加者の画面からだけ消える', () => {
+  const n = answersOf('S002');
+  let r = admin('setItem', { id: 'S002', fields: { show: false } });
+  assert.strictEqual(r.ok, true); assert.strictEqual(r.item.hidden, true);
+  assert.strictEqual(itemById('S002')[9], false);
+  assert.ok(!w.call('ksReadItems_').some(i => i.id === 'S002'));
+  assert.strictEqual(answersOf('S002'), n);
+  assert.strictEqual(admin('overview').items.find(i => i.id === 'S002').hidden, true);
+  r = admin('setItem', { id: 'S002', fields: { show: true } });
+  assert.strictEqual(r.item.hidden, false);
+  assert.ok(w.call('ksReadItems_').some(i => i.id === 'S002'));
+});
+test('設問IDの変更：回答があれば変えられない。なければ変えられる（ほかの設問と同じIDにはできない）', () => {
+  let r = admin('setItem', { id: 'S001', fields: { id: 'S001X' } });
+  assert.strictEqual(r.error, 'invalid'); assert.ok(/回答が/.test(r.message));
+  r = admin('setItem', { id: 'N001', fields: { id: 'S001' } });
+  assert.strictEqual(r.error, 'invalid'); assert.ok(/もう使われています/.test(r.message));
+  r = admin('setItem', { id: 'N001', fields: { id: 'N001-b' } });
+  assert.strictEqual(r.ok, true, JSON.stringify(r)); assert.strictEqual(r.item.id, 'N001-b');
+  assert.ok(itemById('N001-b') && !itemById('N001'));
+  r = admin('setItem', { id: 'N001-b', fields: { id: 'a/b' } });
+  assert.strictEqual(r.error, 'invalid'); assert.ok(/使えない記号/.test(r.message));
+});
+test('同じ設問IDの行が2つあるときは、直せない（シートで直してもらう）', () => {
+  sheet('項目').appendRow(row(1, 9, 'S001', '語彙', '頭（2つめ）'));
+  const r = admin('setItem', { id: 'S001', fields: { prompt: '頭' } });
+  assert.strictEqual(r.error, 'invalid'); assert.ok(/2 つあります/.test(r.message), r.message);
+  const o = admin('overview');
+  assert.strictEqual(o.items.filter(i => i.id === 'S001').length, 2);
+  assert.strictEqual(o.items.filter(i => i.id === 'S001' && i.dup).length, 1);
+  assert.strictEqual(w.call('ksReadItems_').filter(i => i.id === 'S001').length, 1, '参加者には1つだけ届く');
+  const last = sheet('項目').getLastRow();
+  sheet('項目').getRange(last, 1, 1, 12).setValues([['', '', '', '', '', '', '', '', '', '', '', '']]);
+});
+test('設問を足す：IDの重なりはことわる。順が空なら、その歩の最後になる。歩の行がなければ足す', () => {
+  let r = admin('addItem', { fields: { id: 'S001', step: 1, prompt: 'x' } });
+  assert.strictEqual(r.error, 'invalid'); assert.ok(/もう使われています/.test(r.message));
+  r = admin('addItem', { fields: { id: 'N003', step: 7, prompt: '足した語', type: '語彙', context: '読み：たしたご' } });
+  assert.strictEqual(r.ok, true, JSON.stringify(r));
+  assert.deepStrictEqual([r.item.id, r.item.step, r.item.order, r.item.type, r.item.hidden], ['N003', 7, 1, '語彙', false]);
+  r = admin('addItem', { fields: { id: 'N004', step: 7, prompt: '足した文。', type: '例文', segments: '足した｜文' } });
+  assert.strictEqual(r.item.order, 2);
+  assert.ok(w.sheetRows('歩').slice(1).some(x => x[0] === 7), '歩の行が足される');
+  assert.strictEqual(JSON.stringify(w.call('ksReadItems_').filter(i => i.step === 7).map(i => i.id)), JSON.stringify(['N003', 'N004']));
+  assert.strictEqual(admin('addItem', { fields: { id: 'N005', step: 7, prompt: '' } }).error, 'invalid');
+});
+test('歩の名前：直せる・足せる。長すぎる名前はことわる', () => {
+  let r = admin('setStep', { no: 1, title: 'はじめの駅', icon: 'station' });
+  assert.strictEqual(r.ok, true);
+  assert.strictEqual(JSON.stringify(w.sheetRows('歩')[1]), JSON.stringify([1, 'はじめの駅', 'station']));
+  r = admin('setStep', { no: 12, title: '十二歩目', icon: '' });
+  assert.strictEqual(r.ok, true);
+  assert.ok(w.sheetRows('歩').slice(1).some(x => x[0] === 12 && x[1] === '十二歩目'));
+  assert.strictEqual(admin('setStep', { no: 1, title: 'あ'.repeat(61) }).error, 'invalid');
+  assert.strictEqual(admin('setStep', { no: 'x', title: 'a' }).error, 'bad_request');
+  assert.strictEqual(admin('overview').stepRows.find(s => s.no === 1).title, 'はじめの駅');
+});
+test('取りこむ：表にない列は、いまの値のまま（場面・文節・出す・種別が消えない）。下見にもそう出る', () => {
+  const before = itemById('S003');
+  assert.ok(before[5] && before[8], '前提：S003 には場面とイラストがある');
+  admin('setItem', { id: 'S004', fields: { show: false } });
+  const plan = admin('checkItems', { head: ['歩', '設問ID', '提示語・例文'], rows: [[1, 'S003', '目！'], [2, 'S004', '雨が降っている！']], mode: 'merge' }).plan;
+  assert.strictEqual(plan.ok, true, JSON.stringify(plan.errors));
+  assert.ok(plan.head.absent.indexOf('場面・意味・読み') >= 0 && plan.head.absent.indexOf('出す') >= 0, JSON.stringify(plan.head));
+  assert.ok(plan.warnings.some(t => /表にない列/.test(t)), JSON.stringify(plan.warnings));
+  const ch = plan.diff.changed.find(x => x.id === 'S003');
+  assert.deepStrictEqual(ch.fields, ['提示語・例文'], '提示語・例文だけが変わる扱い');
+  const r = admin('importItems', { head: ['歩', '設問ID', '提示語・例文'], rows: [[1, 'S003', '目！'], [2, 'S004', '雨が降っている！']], mode: 'merge', confirm: true });
+  assert.strictEqual(r.ok, true, JSON.stringify(r));
+  const now = itemById('S003');
+  assert.strictEqual(now[4], '目！');
+  assert.strictEqual(now[5], before[5], '場面が消えた'); assert.strictEqual(now[8], before[8], 'イラストが消えた'); assert.strictEqual(now[3], before[3], '種別が変わった');
+  const s4 = itemById('S004');
+  assert.strictEqual(s4[9], false, '「出さない」が「出す」にもどってしまった'); assert.strictEqual(s4[7], '雨が｜降っている', '文節が消えた');
+  admin('setItem', { id: 'S004', fields: { show: true } });
+  admin('setItem', { id: 'S003', fields: { prompt: '目' } });
+});
+test('見出しのない列に書いたことも、調査者が足した列の数式も、直しても取りこんでも残る', () => {
+  const sh = sheet('項目');
+  const rowS1 = itemRows().findIndex(r => r[2] === 'S001') + 2;
+  sh.getRange(1, 13).setValue('数式の列'); sh.getRange(rowS1, 13).setValue('=LEN(E' + rowS1 + ')');
+  sh.getRange(rowS1, 14).setValue('見出しのない列のメモ');                 // N1 は空のまま
+  assert.strictEqual(sh.formulas.length, 1, '前提：数式が1つ入っている');
+  let r = admin('setItem', { id: 'S001', fields: { context: '読み：あたま（直した）' } });
+  assert.strictEqual(r.ok, true, JSON.stringify(r));
+  assert.strictEqual(sh.getRange(rowS1, 14).getValue(), '見出しのない列のメモ', '直したら消えた');
+  assert.strictEqual(sh.getRange(rowS1, 13).getFormulas()[0][0], '=LEN(E' + rowS1 + ')', '直したら数式が消えた');
+  r = admin('importItems', { head: ITEM_HEAD, rows: [row(1, 1, 'S001', '語彙', '頭', '読み：あたま')], mode: 'merge', confirm: true });
+  assert.strictEqual(r.ok, true, JSON.stringify(r));
+  assert.strictEqual(sh.getRange(rowS1, 14).getValue(), '見出しのない列のメモ', '足す・直すだけで消えた');
+  assert.strictEqual(sh.getRange(rowS1, 13).getFormulas()[0][0], '=LEN(E' + rowS1 + ')', '足す・直すだけで数式が消えた');
+  const all = itemRows().map(x => x.slice(0, 12));
+  r = admin('importItems', { head: ITEM_HEAD, rows: all.slice().reverse(), mode: 'replace', confirm: true });     // 並びを逆にして、ぜんぶ入れかえる
+  assert.strictEqual(r.ok, true, JSON.stringify(r));
+  const rowNow = itemRows().findIndex(x => x[2] === 'S001') + 2;
+  assert.notStrictEqual(rowNow, rowS1, '前提：行が動いた');
+  assert.strictEqual(sh.getRange(rowNow, 14).getValue(), '見出しのない列のメモ', 'ぜんぶ入れかえると、見出しのない列が行についてこない');
+  assert.ok(/^=LEN\(E\d+\)$/.test(sh.getRange(rowNow, 13).getFormulas()[0][0]), 'ぜんぶ入れかえると数式が消えた');
+  r = admin('importItems', { head: ITEM_HEAD, rows: all, mode: 'replace', confirm: true });
+  assert.strictEqual(r.ok, true);
+  sh.getRange(1, 13).setValue(''); sh.getRange(rowS1, 13).setValue(''); sh.getRange(rowS1, 14).setValue('');
+});
+test('歩のシート：取りこんでも行を消さない・並べかえない。調査者が足した列も残る。出していない設問だけの歩の名前も残る', () => {
+  const sh = sheet('歩');
+  sh.getRange(1, 4).setValue('歩のメモ'); sh.getRange(2, 4).setValue('1歩目のメモ');
+  sh.appendRow([30, '準備中の歩', '']);
+  const before = w.sheetRows('歩').slice(1).filter(x => x.some(v => v !== ''));
+  const r = admin('importItems', { head: ITEM_HEAD, rows: [row(1, 1, 'S001', '語彙', '頭', '読み：あたま')], mode: 'replace', steps: [[1, '一歩目（新）', 'tree'], [2, '二歩目（新）', '']], confirm: true });
+  assert.strictEqual(r.ok, true, JSON.stringify(r));
+  const now = w.sheetRows('歩').slice(1).filter(x => x.some(v => v !== ''));
+  assert.strictEqual(now.length, before.length, '歩の行が消えた：' + JSON.stringify(now));
+  assert.strictEqual(now[0][1], '一歩目（新）'); assert.strictEqual(now[0][3], '1歩目のメモ', '足した列がずれた');
+  assert.ok(now.some(x => x[0] === 30 && x[1] === '準備中の歩'), '準備中の歩が消えた');
+  assert.ok(now.some(x => x[0] === 7), '出していない設問だけの歩（7）の行が消えた');
+  // 列を並べかえてあっても、歩の名前は正しい列に入る
+  sh.getRange(1, 1, 1, 3).setValues([['タイトル', '歩', 'アイコン']]);
+  const rowsNow = w.sheetRows('歩').slice(1).filter(x => x.some(v => v !== '')).map(x => [x[1], x[0], x[2], x[3]]);
+  sh.getRange(2, 1, rowsNow.length, 4).setValues(rowsNow);
+  let r2 = admin('setStep', { no: 2, title: '二歩目（列を入れかえ）', icon: 'fire' });
+  assert.strictEqual(r2.ok, true, JSON.stringify(r2));
+  const r2row = w.sheetRows('歩').slice(1).find(x => x[1] === 2);
+  assert.deepStrictEqual([r2row[0], r2row[2]], ['二歩目（列を入れかえ）', 'fire'], JSON.stringify(r2row));
+  assert.strictEqual(admin('overview').stepRows.find(x => x.no === 2).title, '二歩目（列を入れかえ）');
+  // もとにもどす
+  const back = w.sheetRows('歩').slice(1).filter(x => x.some(v => v !== '')).map(x => [x[1], x[0], x[2], x[3]]);
+  sh.getRange(1, 1, 1, 3).setValues([['歩', 'タイトル', 'アイコン']]);
+  sh.getRange(2, 1, back.length, 4).setValues(back);
+  admin('setStep', { no: 1, title: 'はじめの駅', icon: 'station' }); admin('setStep', { no: 2, title: '桜島', icon: 'volcano' });
+  sh.getRange(1, 4).setValue(''); sh.getRange(2, 4).setValue('');
+});
+test('設問IDの中に空白があっても、同じ設問として数える（回答のある設問が消えない）', () => {
+  const sh = sheet('項目');
+  const rowS2 = itemRows().findIndex(r => r[2] === 'S002') + 2;
+  sh.getRange(rowS2, 3).setValue('S 002');
+  assert.ok(answersOf('S002') > 0, '前提：S002 に回答がある');
+  const o = admin('overview');
+  assert.strictEqual(o.items.find(i => i.id === 'S002').answers, answersOf('S002'), '空白入りの設問IDの回答が数えられない');
+  const rows = itemRows().filter(r => r[2] !== 'S 002').map(r => r.slice(0, 12));
+  const plan = admin('checkItems', { head: ITEM_HEAD, rows, mode: 'replace' }).plan;
+  const rm = plan.diff.removed.find(x => x.id === 'S002');
+  assert.ok(rm && rm.kept, JSON.stringify(plan.diff.removed));
+  const r = admin('importItems', { head: ITEM_HEAD, rows, mode: 'replace', confirm: true });
+  assert.strictEqual(r.ok, true, JSON.stringify(r)); assert.strictEqual(r.hiddenKept, 1);
+  const kept = itemRows().find(r => r[2] === 'S 002' || r[2] === 'S002');
+  assert.ok(kept && kept[9] === false, '回答のある設問が消えた');
+  sh.getRange(itemRows().findIndex(r => r[2] === kept[2]) + 2, 3).setValue('S002');
+  admin('setItem', { id: 'S002', fields: { show: true } });
+});
+test('足す・直すだけ：同じ設問IDの行がシートに2つあるものは、取りこめない。順だけの変更も下見に出る', () => {
+  sheet('項目').appendRow(row(1, 9, 'S001', '語彙', '頭（2つめ）'));
+  let plan = admin('checkItems', { head: ITEM_HEAD, rows: [row(1, 1, 'S001', '語彙', '頭', '読み：あたま')], mode: 'merge' }).plan;
+  assert.strictEqual(plan.ok, false);
+  assert.ok(plan.rowErrors.some(e => e.id === 'S001' && /2 つあります/.test(e.messages.join(''))), JSON.stringify(plan.rowErrors));
+  const last = sheet('項目').getLastRow();
+  sheet('項目').getRange(last, 1, 1, 12).setValues([['', '', '', '', '', '', '', '', '', '', '', '']]);
+  plan = admin('checkItems', { head: ITEM_HEAD, rows: [row(1, 5, 'S001', '語彙', '頭', '読み：あたま')], mode: 'merge' }).plan;
+  assert.strictEqual(plan.ok, true, JSON.stringify(plan.errors));
+  const ch = plan.diff.changed.find(x => x.id === 'S001');
+  assert.ok(ch && ch.fields.indexOf('順') >= 0 && !ch.big, JSON.stringify(plan.diff));
+});
+test('設問を直す：順を空欄にすると、その歩の最後になる', () => {
+  const r = admin('setItem', { id: 'S001', fields: { order: '' } });
+  assert.strictEqual(r.ok, true, JSON.stringify(r));
+  const ids = w.call('ksReadItems_').filter(i => i.step === 1).map(i => i.id);
+  assert.strictEqual(ids[ids.length - 1], 'S001', ids.join(','));
+  admin('setItem', { id: 'S001', fields: { order: 1 } });
+});
+test('「出さない」の切りかえは、歩が空欄の古い行でもできる', () => {
+  const sh = sheet('項目');
+  sh.appendRow(['', '', 'OLD1', '語彙', '古い行', '', '', '', '', true, '', '']);
+  const rowNo = sh.getLastRow();
+  let r = admin('setItem', { id: 'OLD1', fields: { show: false } });
+  assert.strictEqual(r.ok, true, JSON.stringify(r)); assert.strictEqual(r.item.hidden, true);
+  assert.strictEqual(sh.getRange(rowNo, 10).getValue(), false);
+  r = admin('setItem', { id: 'OLD1', fields: { prompt: '古い行（直す）' } });
+  assert.strictEqual(r.error, 'invalid', '歩が空欄のままでは、ほかの欄は直せない');
+  sh.getRange(rowNo, 1, 1, 12).setValues([['', '', '', '', '', '', '', '', '', '', '', '']]);
+});
+test('控え：日時の形でない名前のシートは、控えとして数えない（消さない・一覧に出さない）', () => {
+  w.ss.insertSheet('項目（控え 手直し前）');
+  const o = admin('overview');
+  assert.ok(o.backups.every(b => /^\d{4}-/.test(b)), JSON.stringify(o.backups));
+  clock += 60000;
+  const r = admin('importItems', { head: ITEM_HEAD, rows: [row(1, 1, 'S001', '語彙', '頭', '読み：あたま')], mode: 'merge', confirm: true });
+  assert.strictEqual(r.ok, true);
+  assert.ok(w.ss.getSheetByName('項目（控え 手直し前）'), '手で作ったシートが消された');
+  assert.strictEqual(w.ss.getSheets().map(s => s.getName()).filter(n => /^項目（控え \d/.test(n)).length, 5);
+  w.ss.deleteSheet(w.ss.getSheetByName('項目（控え 手直し前）'));
+});
+test('控えからもどす：もどす前にいまの控えをとり、「項目」「歩」の中身が控えのとおりになる', () => {
+  const beforeItems = itemRows().map(r => r.slice(0, 12).map(v => String(v)));
+  const beforeSteps = w.sheetRows('歩').slice(1).filter(x => x.some(v => v !== '')).map(r => r.slice(0, 3).map(v => String(v)));
+  clock += 60000;
+  const imp = admin('importItems', { head: ITEM_HEAD, rows: [row(1, 1, 'R001', '語彙', 'もどす前の語')], mode: 'replace', steps: [[1, 'もどす前の歩', '']], confirm: true });
+  assert.strictEqual(imp.ok, true, JSON.stringify(imp));
+  const stamp = imp.backups[0].replace(/^項目（控え (.+)）$/, '$1');
+  assert.strictEqual(w.call('ksReadItems_').map(i => i.id).join(','), 'R001');
+  assert.strictEqual(admin('restoreItems', { stamp: '2000-01-01 00:00' }).error, 'not_found');
+  clock += 60000;
+  const r = admin('restoreItems', { stamp });
+  assert.strictEqual(r.ok, true, JSON.stringify(r));
+  assert.strictEqual(r.restored, stamp); assert.strictEqual(r.backups.length, 2, 'もどす前の控えがとられていない');
+  assert.strictEqual(JSON.stringify(itemRows().map(x => x.slice(0, 12).map(v => String(v)))), JSON.stringify(beforeItems), '項目がもどっていない');
+  assert.strictEqual(JSON.stringify(w.sheetRows('歩').slice(1).filter(x => x.some(v => v !== '')).map(x => x.slice(0, 3).map(v => String(v)))), JSON.stringify(beforeSteps), '歩がもどっていない');
+  assert.ok(w.call('ksReadItems_').some(i => i.id === 'S001') && !w.call('ksReadItems_').some(i => i.id === 'R001'));
+  assert.ok(w.ss.getSheetByName('項目（控え ' + r.backups[0].replace(/^項目（控え (.+)）$/, '$1') + '）'));
+});
+test('さわらない行の、決まった列（調査の狙いなど）にある数式も、取りこみ・直しで消えない', () => {
+  const sh = sheet('項目');
+  const rowS3 = itemRows().findIndex(r => r[2] === 'S003') + 2;
+  sh.getRange(rowS3, 12).setNumberFormat('General').setValue('=LEN(E' + rowS3 + ')');   // 調査の狙い の列に数式（書式は「自動」）
+  assert.strictEqual(sh.getRange(rowS3, 12).getFormulas()[0][0], '=LEN(E' + rowS3 + ')');
+  let r = admin('importItems', { head: ITEM_HEAD, rows: [row(1, 1, 'S001', '語彙', '頭', '読み：あたま')], mode: 'merge', confirm: true });
+  assert.strictEqual(r.ok, true, JSON.stringify(r));
+  assert.strictEqual(sh.getRange(rowS3, 12).getFormulas()[0][0], '=LEN(E' + rowS3 + ')', 'さわらない行の数式が消えた');
+  r = admin('setItem', { id: 'S003', fields: { context: '読み：め（直した）' } });
+  assert.strictEqual(r.ok, true, JSON.stringify(r));
+  assert.strictEqual(sh.getRange(rowS3, 12).getFormulas()[0][0], '=LEN(E' + rowS3 + ')', '直した行の、送っていない欄の数式が消えた');
+  assert.strictEqual(itemById('S003')[5], '読み：め（直した）');
+  r = admin('importItems', { head: ['歩', '設問ID', '提示語・例文'], rows: [[1, 'S003', '目']], mode: 'merge', confirm: true });
+  assert.strictEqual(r.ok, true, JSON.stringify(r));
+  assert.strictEqual(sh.getRange(rowS3, 12).getFormulas()[0][0], '=LEN(E' + rowS3 + ')', '表にない列の数式が、値に変わった');
+  sh.getRange(rowS3, 12).setValue('');
+});
+test('順の列がない表：ぜんぶ入れかえると表の順になる。足す・直すだけなら、前からある設問は順のまま、新しい設問は歩の最後', () => {
+  const cur = itemRows().filter(r => r[9] !== false).map(r => r.slice(0, 12));
+  const noOrder = cur.map(r => [r[0], r[2], r[4]]);
+  const swapped = noOrder.slice(); const t = swapped[0]; swapped[0] = swapped[1]; swapped[1] = t;
+  let plan = admin('checkItems', { head: ['歩', '設問ID', '提示語・例文'], rows: swapped, mode: 'replace' }).plan;
+  assert.strictEqual(plan.ok, true, JSON.stringify(plan.errors));
+  assert.ok(plan.diff.changed.some(x => x.fields.indexOf('順') >= 0), '順が変わることが下見に出ない');
+  let r = admin('importItems', { head: ['歩', '設問ID', '提示語・例文'], rows: swapped, mode: 'replace', confirm: true });
+  assert.strictEqual(r.ok, true, JSON.stringify(r));
+  const got = w.call('ksReadItems_').map(i => i.id);
+  assert.strictEqual(got.slice(0, 2).join(','), swapped[0][1] + ',' + swapped[1][1], '表の順になっていない：' + got.join(','));
+  // もとの順にもどす
+  admin('importItems', { head: ['歩', '設問ID', '提示語・例文'], rows: noOrder, mode: 'replace', confirm: true });
+  const before = w.call('ksReadItems_').filter(i => i.step === 1).map(i => i.id + ':' + i.order).join(',');
+  plan = admin('checkItems', { head: ['歩', '設問ID', '提示語・例文'], rows: [[1, 'S001', '頭'], [1, 'NEW9', '新しい設問']], mode: 'merge' }).plan;
+  assert.ok(!plan.diff.changed.some(x => x.id === 'S001' && x.fields.indexOf('順') >= 0), '足す・直すだけで、順が変わる扱いになっている');
+  r = admin('importItems', { head: ['歩', '設問ID', '提示語・例文'], rows: [[1, 'S001', '頭'], [1, 'NEW9', '新しい設問']], mode: 'merge', confirm: true });
+  assert.strictEqual(r.ok, true, JSON.stringify(r));
+  const after = w.call('ksReadItems_').filter(i => i.step === 1);
+  assert.strictEqual(after.filter(i => i.id !== 'NEW9').map(i => i.id + ':' + i.order).join(','), before, '前からある設問の順が変わった');
+  assert.strictEqual(after[after.length - 1].id, 'NEW9', '新しい設問が歩の最後に来ない');
+  admin('importItems', { head: ITEM_HEAD, rows: itemRows().filter(x => x[2] !== 'NEW9').map(x => x.slice(0, 12)), mode: 'replace', confirm: true });
+});
+test('控えからもどす：いちばん古い控えをえらんでも、消される前に読んでもどせる。項目と歩の控えは同じ日時', () => {
+  const names = () => w.ss.getSheets().map(x => x.getName()).filter(n => /^項目（控え \d/.test(n)).map(n => n.replace(/^項目（控え (.+)）$/, '$1')).sort();   // 日時の順
+  for (let i = 0; names().length < 5; i++) { clock += 60000; admin('importItems', { head: ITEM_HEAD, rows: [row(1, 1, 'S001', '語彙', '頭', '読み：あたま')], mode: 'merge', confirm: true }); }
+  const oldest = names()[0];
+  const trim = rows => rows.map(x => { const y = x.map(v => String(v)); while (y.length && y[y.length - 1] === '') y.pop(); return y; }).filter(y => y.length);
+  const oldestRows = JSON.stringify(trim(w.sheetRows('項目（控え ' + oldest + '）')));
+  assert.ok(w.ss.getSheetByName('歩（控え ' + oldest + '）'), '項目と歩の控えの日時がちがう');
+  clock += 60000;
+  const r = admin('restoreItems', { stamp: oldest });
+  assert.strictEqual(r.ok, true, JSON.stringify(r));
+  assert.strictEqual(JSON.stringify(trim(w.sheetRows('項目'))), oldestRows, 'いちばん古い控えの中身にもどっていない');
+  assert.ok(!w.ss.getSheetByName('項目（控え ' + oldest + '）'), '（古い控えは、新しい控えをとったときに消える）' + JSON.stringify([oldest, names(), r.backups]));
+  assert.strictEqual(r.backups.length, 2);
+  assert.strictEqual(r.backups[0].replace(/^項目/, ''), r.backups[1].replace(/^歩/, ''), '項目と歩の控えの日時がちがう');
+});
+test('初期設定：「項目」シートの足りない見出しを足す（消してしまった列を直せる）', () => {
+  const sh = sheet('項目');
+  const col = itemHead().indexOf('調査の狙い') + 1;
+  sh.getRange(1, col).setValue('');
+  const keepLog = console.log; console.log = () => {};
+  try { w.call('setup'); } finally { console.log = keepLog; }
+  assert.ok(itemHead().indexOf('調査の狙い') >= 0, '見出しが足されない');
+  if (itemHead().indexOf('調査の狙い') + 1 !== col) {                  // 右はしに足されたときは、もとの列にもどす
+    sh.getRange(1, itemHead().indexOf('調査の狙い') + 1).setValue('');
+    sh.getRange(1, col).setValue('調査の狙い');
+  }
+});
+test('「項目」シートが見つからないときは、取りこみも直すこともことわる（わけのわからないエラーにしない）', () => {
+  const it = sheet('項目');
+  it.name = '項目（古い）';
+  assert.ok(/「項目」シートが見つかりません/.test(admin('setItem', { id: 'S001', fields: { prompt: 'x' } }).message));
+  assert.ok(/「項目」シートが見つかりません/.test(admin('importItems', { head: ITEM_HEAD, rows: [row(1, 1, 'Z1', '語彙', 'x')], mode: 'merge', confirm: true }).message));
+  it.name = '項目';
+});
+test('多すぎる表（2001 件）はことわる', () => {
+  const rows = [];
+  for (let i = 0; i < 2001; i++) rows.push(row(1, i + 1, 'M' + i, '語彙', 'x' + i));
+  const r = admin('checkItems', { head: ITEM_HEAD, rows, mode: 'replace' });
+  assert.strictEqual(r.plan.ok, false); assert.ok(/多すぎます/.test(r.plan.errors[0]));
 });
 
 Date.now = realNow;

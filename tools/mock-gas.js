@@ -39,6 +39,16 @@ function createGasWorld(codePath) {
     }
     setValue(v) { for (let r = 0; r < this.nr; r++) for (let c = 0; c < this.nc; c++) this.sheet._set(this.row + r, this.col + c, v); return this; }
     getValue() { return this.sheet._get(this.row, this.col); }
+    getFormulas() {
+      const out = [];
+      for (let r = 0; r < this.nr; r++) {
+        const line = [];
+        for (let c = 0; c < this.nc; c++) { const f = this.sheet.formulas.find(x => x.r === this.row + r && x.c === this.col + c); line.push(f ? f.v : ''); }
+        out.push(line);
+      }
+      return out;
+    }
+    clearContent() { for (let r = 0; r < this.nr; r++) for (let c = 0; c < this.nc; c++) this.sheet._set(this.row + r, this.col + c, ''); return this; }
     setNumberFormat(f) {
       for (let c = 0; c < this.nc; c++) {
         // 列全体の書式は「そのとき存在していた行」までにしか付かないものとして扱う（厳しめの想定）
@@ -84,6 +94,7 @@ function createGasWorld(codePath) {
       const row = this.rows[r - 1];
       while (row.length < c) row.push('');
       if (v === null || v === undefined) v = '';
+      this.formulas = this.formulas.filter(x => !(x.r === r && x.c === c));   // 書きかえたセルの、前の数式は消える
       if (typeof v === 'string') {
         const text = this._format(r, c) === '@';
         if (v.charAt(0) === "'") v = v.slice(1);                       // 先頭の ' は「文字として扱う」印
@@ -112,7 +123,7 @@ function createGasWorld(codePath) {
     }
     getDataRange() { return new Range(this, 1, 1, Math.max(this.getLastRow(), 1), Math.max(this.getLastColumn(), 1)); }
     appendRow(arr) { const r = this.getLastRow() + 1; if (r > this.maxRows) this.maxRows = r; if (arr.length > this.maxCols) this.maxCols = arr.length; arr.forEach((v, i) => this._set(r, i + 1, v)); return this; }
-    clearContents() { this.rows = []; return this; }
+    clearContents() { this.rows = []; this.formulas = []; return this; }
     setFrozenRows() {} setColumnWidth() {}
   }
 

@@ -144,7 +144,7 @@ a { color: var(--link); }
 .card { background: var(--card); border: 1.5px solid var(--line); border-radius: 18px; padding: 18px 20px; min-width: 0; }
 .card__head { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px 12px; margin-bottom: 12px; }
 .card__title { font-size: 16px; font-weight: 700; }
-.card__tools { display: flex; align-items: center; gap: 10px; }
+.card__tools { display: flex; align-items: center; flex-wrap: wrap; justify-content: flex-end; gap: 10px; }
 .card__note { margin-top: 12px; color: var(--ink-2); font-size: 13px; }
 .empty { padding: 22px 8px; text-align: center; color: var(--ink-2); font-size: 14px; }
 
@@ -397,6 +397,41 @@ button.pid:hover { background: #fff; }
 .newlist th, .newlist td { padding: 7px 14px; text-align: left; border-bottom: 1.5px solid var(--line-2); }
 .newlist tr:last-child td { border-bottom: 0; }
 .newlist th { font-size: 12.5px; color: var(--ink-2); }
+.newlist--tall { max-height: 320px; }
+.newlist--tall td { font-size: 13.5px; vertical-align: top; }
+/* 項目 */
+.table--items .col-act { width: 170px; }
+.cell-q__chips { display: block; margin-top: 4px; }
+.hiddenbox { margin-top: 22px; padding-top: 14px; border-top: 1.5px solid var(--line); }
+.hiddenbox__sum, .morebox__sum { cursor: pointer; font-weight: 700; font-size: 14.5px; color: var(--link); }
+.hiddenbox__sum::marker, .morebox__sum::marker { color: var(--ink-2); }
+.morebox { margin-top: 14px; }
+.morebox > .field, .morebox > .newlist { margin-top: 10px; }
+.notice--warn { background: var(--sun-pale); border-color: #E7C84A; }
+.bullets { margin: 4px 0 0; padding-left: 18px; list-style: disc; }
+.bullets li + li { margin-top: 2px; }
+.form .notice { margin-bottom: 14px; }
+.form__row { display: grid; grid-template-columns: minmax(0, 1fr) 150px; gap: 0 14px; }
+.form__row > .field + .field { margin-top: 0; }
+.form__row--3 { grid-template-columns: 110px 110px minmax(0, 1fr); }
+.form__row + .field, .form__row + .kindbox, .field + .form__row, .kindbox + .form__row, .kindbox > .field, .kindbox + .kindbox { margin-top: 16px; }
+.kindbox { min-width: 0; }
+.dialog--wide { max-width: 640px; }
+.textarea--mono { font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace; font-size: 13px; line-height: 1.5; white-space: pre; overflow-x: auto; }
+.modes { display: grid; gap: 10px; }
+.mode { display: grid; grid-template-columns: 22px minmax(0, 1fr); gap: 0 10px; align-items: start; padding: 12px 14px; border: 2px solid var(--line); border-radius: 14px; cursor: pointer; }
+.mode--on { border-color: var(--ink); background: var(--sky); box-shadow: var(--drop); }
+.mode input { width: 18px; height: 18px; margin: 3px 0 0; accent-color: var(--ink); grid-row: 1 / 3; }
+.mode__name { font-weight: 700; font-size: 15px; }
+.mode__hint { color: var(--ink-2); font-size: 13px; }
+.plan__tiles .tile__value { font-size: 26px; }
+@media screen and (max-width: 860px) {
+  .form__row, .form__row--3 { grid-template-columns: minmax(0, 1fr); }
+  .form__row > .field + .field { margin-top: 16px; }
+  .table--items .col-act { width: auto; }
+  .card__tools { justify-content: flex-start; }
+  .card__tools .btn { flex: 1 1 auto; }
+}
 .toast { position: fixed; left: 50%; bottom: 26px; z-index: 60; transform: translateX(-50%); width: max-content; max-width: calc(100vw - 32px); padding: 9px 16px; border-radius: 12px; background: var(--ink); color: #fff; font-weight: 700; font-size: 14px; }
 body[data-screen="settings"] .toast { bottom: 108px; }
 .screen { display: grid; justify-items: center; align-content: center; min-height: 60vh; padding: 24px; text-align: center; }
@@ -758,8 +793,10 @@ var KSQR = (function () {
     chart: { range: '14', table: false },
     people: { q: '', filter: 'all', pw: null, pwLoading: false, selected: bag(), editing: '', memoDraft: '', memoStart: '', memoSaving: bag(), busy: bag() },
     answers: { filter: blankFilter(), qDraft: '', offset: 0, data: null, loading: false, error: '', open: bag(), loud: true, fresh: 0 },
-    settings: { draft: null, touched: bag(), dirty: false, saving: false, toggling: false, message: '', bad: false }
+    settings: { draft: null, touched: bag(), dirty: false, saving: false, toggling: false, message: '', bad: false },
+    items: { busy: bag(), showHidden: false, importing: null }
   };
+  state.items.importing = blankImport();
   function blankFilter() { return { participant: '', step: '', status: '', flag: '', item: '', q: '' }; }
   function byId(id) { return document.getElementById(id); }
 
@@ -812,6 +849,7 @@ var KSQR = (function () {
     save: ic('<path d="M12 4.500v10.500M7.500 11l4.500 4.500 4.500-4.500M5 19.500h14"/>'),
     sheet: ic('<rect x="4.500" y="4" width="15" height="16" rx="2"/><path d="M4.500 9.500h15M4.500 14.500h15M10 9.500V20"/>'),
     folder: ic('<path d="M3.500 7.500a2 2 0 0 1 2-2h4l2 2.500h7a2 2 0 0 1 2 2V17a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"/>'),
+    upload: ic('<path d="M12 15.500V5M7.500 9.500L12 5l4.500 4.500M5 19.500h14"/>'),
     pencil: ic('<path d="M4.500 19.500l1-4.200L16.300 4.500a1.800 1.800 0 0 1 2.600 0l.600.600a1.800 1.800 0 0 1 0 2.600L8.700 18.500z"/>'),
     micoff: ic('<path d="M12 3a3 3 0 0 0-3 3v5.500a3 3 0 0 0 4.900 2.300M15 9.500V6a3 3 0 0 0-1.500-2.600"/><path d="M5.500 11.500a6.500 6.500 0 0 0 10.700 5M18.500 11.500a6.500 6.500 0 0 1-.400 2.200M12 18v3M4 4l16 16"/>')
   };
@@ -1154,6 +1192,8 @@ var KSQR = (function () {
     }
     var sp = state.people, who = sp.editing && D ? personById(sp.editing) : null;
     if (who && sp.memoDraft !== sp.memoStart && sp.memoDraft.trim() !== String(who.memo || '')) kept.push([who.id + ' のメモ', sp.memoDraft]);
+    var im = state.items.importing;
+    if (im && im.text.trim()) kept.push(['取りこむために貼りつけた表', im.text]);
     if (kept.length) {
       page.appendChild(h('div', { class: 'rescue' },
         h('p', { class: 'screen__text', text: 'まだ保存していなかった内容は、次のとおりです。必要なら、写しをとっておいてください。' }),
@@ -1213,8 +1253,9 @@ var KSQR = (function () {
   }
   function paintChrome() {
     var marks = document.querySelectorAll('[data-view]');
+    var navView = view === 'import' ? 'items' : view;          // 「表から取りこむ」は、項目の画面の一部
     for (var i = 0; i < marks.length; i++) {
-      if (marks[i].getAttribute('data-view') === view) marks[i].setAttribute('aria-current', 'page');
+      if (marks[i].getAttribute('data-view') === navView) marks[i].setAttribute('aria-current', 'page');
       else marks[i].removeAttribute('aria-current');
     }
     document.body.setAttribute('data-screen', view);
@@ -2307,38 +2348,643 @@ var KSQR = (function () {
    * 項目
    * ============================================================ */
   var STATUS_COLOR = ['var(--series-1)', 'var(--series-2)', 'var(--series-3)', 'var(--series-4)'];
+  // 参加者のサイトにある絵の名前（歩のアイコン・設問のイラストに使える）
+  var ART_NAMES = ['anchor', 'back', 'bell', 'book', 'boy', 'car', 'cat', 'child', 'dash', 'dog', 'ear', 'elephant', 'exclamation', 'eye', 'eyes', 'ferry', 'fire', 'fish',
+    'flower', 'foot', 'garden', 'girl', 'hand', 'handshake', 'head', 'hoe', 'house', 'knife', 'leaf', 'me', 'moon', 'mountain', 'mouse', 'mouth', 'nose', 'person', 'pig',
+    'question', 'rain', 'rice', 'rice_bowl', 'rock', 'run', 'sake', 'search', 'shopping', 'shrine', 'sickle', 'star', 'station', 'sun', 'sweet_potato', 'tangerine', 'tea',
+    'thought', 'tooth', 'town', 'tram', 'tree', 'umbrella', 'vinegar', 'volcano', 'walk', 'water'];
+  var ITEM_HEAD = ['歩', '順', '設問ID', '種別', '提示語・例文', '場面・意味・読み', '提案例文（語彙）', '文節の区切り', 'イラスト', '出す', '記述項目', '調査の狙い'];
+  function limits() { return (D && D.limits) || { items: 2000, prompt: 300, context: 600, example: 300, segments: 400, art: 100, note: 300, aim: 600, stepTitle: 60, stepIcon: 40 }; }
+  function stepInfo(no) {
+    var i;
+    for (i = 0; i < D.steps.length; i++) if (D.steps[i].no === no) return D.steps[i];
+    var rows = D.stepRows || [];
+    for (i = 0; i < rows.length; i++) if (rows[i].no === no) return { no: no, title: rows[i].title, icon: rows[i].icon, count: 0 };
+    return { no: no, title: '', icon: '', count: 0 };
+  }
+  // 歩ごとに、出している設問と出していない設問をまとめる（出していない設問だけの歩も、一覧に出す）
+  function stepGroups() {
+    var nos = bag(), i;
+    for (i = 0; i < D.items.length; i++) nos[D.items[i].step] = true;
+    var list = Object.keys(nos).map(Number).sort(function (a, b) { return a - b; });
+    return list.map(function (no) {
+      var g = { no: no, info: stepInfo(no), shown: [], hidden: [] };
+      for (var j = 0; j < D.items.length; j++) {
+        var it = D.items[j];
+        if (it.step !== no) continue;
+        if (it.hidden || it.dup) g.hidden.push(it); else g.shown.push(it);
+      }
+      return g;
+    });
+  }
+  function artList() {
+    var dl = byId('art-list');
+    if (dl) return null;
+    return h('datalist', { id: 'art-list' }, ART_NAMES.map(function (n) { return h('option', { value: n }); }));
+  }
   VIEWS.items = function () {
+    var st = state.items;
     var card = h('section', { class: 'card' });
+    var hiddenCount = 0, dupCount = 0;
+    D.items.forEach(function (it) { if (it.dup) dupCount++; else if (it.hidden) hiddenCount++; });
     card.appendChild(h('div', { class: 'card__head' },
       h('div', { class: 'legend', 'aria-label': '色の意味' }, D.statuses.map(function (s, i) {
         return h('span', { class: 'legend__item' }, h('span', { class: 'legend__key', style: 'background:' + STATUS_COLOR[i] }), s);
       })),
-      httpsLink(D.links.sheets && D.links.sheets['項目'], { class: 'btn btn--small' }, h('span', { svg: ICON.sheet }), '「項目」シートを開く')));
-    if (!D.items.length) card.appendChild(h('p', { class: 'empty', text: '「項目」シートに、設問がまだありません。' }));
-    D.steps.forEach(function (st) {
-      var items = D.items.filter(function (it) { return it.step === st.no; });
-      card.appendChild(h('div', { class: 'stephead' }, h('h2', { class: 'stephead__title', text: stepName(st) }), h('span', { class: 'muted', style: 'font-size:13px', text: items.length + '問' })));
-      card.appendChild(h('div', { class: 'tablewrap' }, h('table', { class: 'table table--stack table--items' },
-        h('thead', {}, h('tr', {}, h('th', { text: '設問' }), h('th', { class: 'col-n', text: '回答した人' }), h('th', { class: 'col-bar', text: '内訳' }), h('th', { class: 'col-go' }, h('span', { class: 'sr', text: '回答を見る' })))),
-        h('tbody', {}, items.map(function (it) {
-          var total = it.stat.reduce(function (a, b) { return a + b; }, 0);
-          var bar = total ? h('div', { class: 'stackbar', role: 'img', 'aria-label': D.statuses.map(function (s, i) { return s + ' ' + it.stat[i] + '人'; }).join('、') },
-            it.stat.map(function (n, i) { return n > 0 ? h('span', { class: 'stackbar__seg', style: 'flex:' + n + ' 1 0;background:' + STATUS_COLOR[i], title: D.statuses[i] + '：' + n + '人' }) : null; }))
-            : h('div', { class: 'stackbar stackbar--none', role: 'img', 'aria-label': 'まだ回答がありません' });
-          var words = [];
-          for (var i = 0; i < it.stat.length; i++) if (it.stat[i] > 0) words.push(D.statuses[i] + ' ' + it.stat[i]);
-          return h('tr', {},
-            h('td', { class: 'cell-q' }, it.prompt, h('span', { class: 'cell-q__id', text: it.id + '　' + it.type + (it.context ? '　' + it.context : '') })),
-            h('td', { class: 'nowrap num', 'data-label': '回答した人' }, h('span', { text: total + '人' })),
-            h('td', { 'data-label': '内訳' }, h('div', { class: 'grow' }, bar, h('p', { class: 'breakdown', text: words.join('　') || 'まだ回答がありません' }))),
-            h('td', { class: 'right' }, total ? h('button', { type: 'button', class: 'textbtn', 'data-fk': 'item:' + it.id, 'aria-label': '「' + it.prompt + '」の回答を見る', onclick: function () { show('answers', { filter: { item: it.id } }); } }, '回答を見る') : null));
-        })))));
+      h('div', { class: 'card__tools' },
+        h('button', { type: 'button', class: 'btn btn--small', id: 'item-add', onclick: function () { editItem(null); } }, h('span', { svg: ICON.plus }), '設問を足す'),
+        h('button', { type: 'button', class: 'btn btn--small btn--primary', id: 'item-import', onclick: function () { show('import'); } }, h('span', { svg: ICON.upload }), '表から取りこむ'),
+        httpsLink(D.links.sheets && D.links.sheets['項目'], { class: 'btn btn--small' }, h('span', { svg: ICON.sheet }), '「項目」シートを開く'))));
+    if (!D.items.length) card.appendChild(h('p', { class: 'empty', text: '設問がまだありません。「表から取りこむ」か「設問を足す」で入れてください。' }));
+    stepGroups().forEach(function (g) {
+      var info = g.info;
+      card.appendChild(h('div', { class: 'stephead' },
+        h('h2', { class: 'stephead__title', text: stepName(info) }),
+        h('span', { class: 'muted', style: 'font-size:13px', text: g.shown.length + '問' + (g.hidden.length ? '（ほかに出していない設問 ' + g.hidden.length + '）' : '') }),
+        h('button', { type: 'button', class: 'textbtn', 'data-fk': 'step:' + g.no, 'aria-label': g.no + '歩目の名前を直す', onclick: function () { editStep(g.no); } }, h('span', { svg: ICON.pencil }), '名前を直す')));
+      if (!g.shown.length) card.appendChild(h('p', { class: 'empty', style: 'padding:8px 0 12px', text: 'この歩で出している設問はありません。' }));
+      else {
+        card.appendChild(h('div', { class: 'tablewrap' }, h('table', { class: 'table table--stack table--items' },
+          h('thead', {}, h('tr', {}, h('th', { text: '設問' }), h('th', { class: 'col-n', text: '回答した人' }), h('th', { class: 'col-bar', text: '内訳' }), h('th', { class: 'col-act' }, h('span', { class: 'sr', text: '操作' })))),
+          h('tbody', {}, g.shown.map(function (it) { return itemRow(it, false); })))));
+      }
     });
+    if (hiddenCount || dupCount) {
+      var hiddenItems = D.items.filter(function (it) { return it.hidden || it.dup; });
+      var det = h('details', { class: 'hiddenbox', open: st.showHidden ? true : null, ontoggle: function (e) { st.showHidden = e.target.open; } },
+        h('summary', { class: 'hiddenbox__sum' }, '出していない設問（' + hiddenCount + '）' + (dupCount ? '・同じ設問IDの2つめ以降（' + dupCount + '）' : '')),
+        h('p', { class: 'field__hint', style: 'margin:4px 0 8px', text: '参加者の画面には出ません。回答のある設問は、消すかわりにここに置いておけます。' }),
+        h('div', { class: 'tablewrap' }, h('table', { class: 'table table--stack table--items' },
+          h('thead', {}, h('tr', {}, h('th', { text: '設問' }), h('th', { class: 'col-n', text: '回答' }), h('th', { class: 'col-bar', text: '歩' }), h('th', { class: 'col-act' }, h('span', { class: 'sr', text: '操作' })))),
+          h('tbody', {}, hiddenItems.map(function (it) { return itemRow(it, true); })))));
+      card.appendChild(det);
+    }
+    var latest = (D.backups && D.backups.length) ? '項目（控え ' + D.backups[0] + '）' : '';
     return h('div', { class: 'stack' },
-      head('項目', '設問ごとに、何人が答えたか、どう答えたかを確かめられます。'),
-      h('div', { class: 'notice' }, h('span', { svg: ICON.sheet }), h('span', { text: '設問の追加や書きかえは、スプレッドシートの「項目」シートで行います。同じ設問に何度か答えた人は、いちばん新しい回答で数えています。' })),
-      card);
+      head('項目', '設問ごとの回答のようすを見たり、設問を直したり、表から取りこんだりできます。'),
+      h('div', { class: 'notice' }, h('span', { svg: ICON.sheet }),
+        h('span', { class: 'notice__grow', text: '「直す」で1つずつ直せます。たくさんの設問を入れかえるときは「表から取りこむ」が便利です（取りこむ前に、いまの「項目」「歩」シートの控えが自動でとられます' + (latest ? '。いちばん新しい控え：' + latest : '') + '）。同じ設問に何度か答えた人は、いちばん新しい回答で数えています。' }),
+        latest ? h('button', { type: 'button', class: 'btn btn--small', id: 'item-restore', onclick: restoreDialog }, '控えからもどす') : null),
+      card, artList());
   };
+  // 控えのシートの内容を、「項目」「歩」シートにもどす
+  function restoreDialog() {
+    var list = D.backups || [];
+    if (!list.length) return;
+    var sel = h('select', { class: 'select', id: 'restore-pick' }, list.map(function (st) { return h('option', { value: st, text: st }); }));
+    var body = h('div', { class: 'form' },
+      h('p', { text: 'えらんだ日時の控えの内容を、「項目」シート（と「歩」シート）にもどします。参加者の画面も、その内容になります。' }),
+      h('p', { text: 'いまの内容は、もどす前に新しい控えにとります（もどしたことを、またもどせます）。' }),
+      h('div', { class: 'field' }, h('label', { class: 'field__label', for: 'restore-pick', text: 'どの控えにもどすか' }), sel));
+    dialog({ title: '控えからもどす', body: body, actions: [
+      { label: 'やめる', value: null },
+      { label: 'この控えにもどす', kind: 'danger', run: function (close, setError, setBusy) {
+        setBusy(true);
+        mutate('restoreItems', { stamp: sel.value }).then(function (res) { close(res); }, function (err) {
+          if (failed(err, true)) { close(null); return; }
+          setBusy(false);
+          setError(err.message);
+        });
+      } }
+    ] }).then(function (res) {
+      if (!res) return;
+      loadOverview().then(function () { if (view === 'items') render(); toast('控え「' + res.restored + '」の内容にもどしました（出している設問 ' + res.items + ' 問）。'); },
+        function (err) { if (!failed(err, true)) toast('もどしましたが、新しい内容を読みこめませんでした。「更新」を押してください。'); });
+    });
+  }
+  function itemRow(it, inHidden) {
+    var st = state.items;
+    var total = it.stat.reduce(function (a, b) { return a + b; }, 0);
+    var bar = total ? h('div', { class: 'stackbar', role: 'img', 'aria-label': D.statuses.map(function (s, i) { return s + ' ' + it.stat[i] + '人'; }).join('、') },
+      it.stat.map(function (n, i) { return n > 0 ? h('span', { class: 'stackbar__seg', style: 'flex:' + n + ' 1 0;background:' + STATUS_COLOR[i], title: D.statuses[i] + '：' + n + '人' }) : null; }))
+      : h('div', { class: 'stackbar stackbar--none', role: 'img', 'aria-label': 'まだ回答がありません' });
+    var words = [];
+    for (var i = 0; i < it.stat.length; i++) if (it.stat[i] > 0) words.push(D.statuses[i] + ' ' + it.stat[i]);
+    var busy = !!st.busy[it.id];
+    var chips = [];
+    if (it.dup) chips.push(h('span', { class: 'chip chip--warn' }, h('span', { svg: ICON.warn }), '同じ設問IDの2つめ（シートで直してください）'));
+    else if (it.hidden) chips.push(h('span', { class: 'chip chip--mute', text: '出していない' }));
+    var acts = [
+      !it.dup ? h('button', { type: 'button', class: 'textbtn', disabled: busy, 'data-fk': 'edit:' + it.id, 'aria-label': '「' + it.prompt + '」を直す', onclick: function () { editItem(it); } }, h('span', { svg: ICON.pencil }), '直す') : null,
+      !it.dup ? h('button', { type: 'button', class: 'textbtn', disabled: busy, 'data-fk': 'hide:' + it.id, 'aria-label': '「' + it.prompt + '」を' + (it.hidden ? '出す' : '出さない'), onclick: function () { toggleHidden(it); } }, it.hidden ? '出す' : '出さない') : null,
+      it.answers ? h('button', { type: 'button', class: 'textbtn', 'data-fk': 'item:' + it.id, 'aria-label': '「' + it.prompt + '」の回答を見る', onclick: function () { show('answers', { filter: { item: it.id } }); } }, '回答を見る') : null
+    ];
+    return h('tr', { 'data-off': it.hidden ? 'true' : null },
+      h('td', { class: 'cell-q' }, it.prompt, chips.length ? h('span', { class: 'cell-q__chips' }, chips) : null,
+        h('span', { class: 'cell-q__id', text: it.id + '　' + it.type + (it.context ? '　' + it.context : '') })),
+      inHidden
+        ? h('td', { class: 'nowrap num', 'data-label': '回答' }, h('span', { text: it.answers + '件' }))
+        : h('td', { class: 'nowrap num', 'data-label': '回答した人' }, h('span', { text: total + '人' })),
+      inHidden
+        ? h('td', { 'data-label': '歩', text: it.step + '歩目' })
+        : h('td', { 'data-label': '内訳' }, h('div', { class: 'grow' }, bar, h('p', { class: 'breakdown', text: words.join('　') || 'まだ回答がありません' }))),
+      h('td', { class: 'right' }, h('div', { class: 'rowactions' }, acts)));
+  }
+  // 設問を1つ直す・足す（it が null なら足す）
+  function editItem(it) {
+    var lim = limits(), isNew = !it;
+    var init = it || { id: '', type: '語彙', prompt: '', context: '', example: '', segments: [], step: (D.steps.length ? D.steps[D.steps.length - 1].no : 1), order: '', hidden: false, art: '', note: '', aim: '', answers: 0 };
+    var f = {};
+    function field(key, label, el, hint) {
+      el.id = 'it-' + key;
+      return h('div', { class: 'field' }, h('label', { class: 'field__label', for: el.id, text: label }), el, hint ? h('p', { class: 'field__hint', text: hint }) : null);
+    }
+    var lockId = !isNew && it.answers > 0;
+    f.id = h('input', { type: 'text', class: 'input', value: init.id, maxlength: '40', autocomplete: 'off', readonly: lockId ? true : null, 'data-autofocus': isNew ? true : null });
+    f.type = h('select', { class: 'select', onchange: paintKind }, h('option', { value: '語彙', text: '語彙（ことば）' }), h('option', { value: '例文', text: '例文（文）' }));
+    f.type.value = init.type;
+    f.prompt = h('textarea', { class: 'textarea', rows: '2', maxlength: String(lim.prompt), style: 'min-height:58px', 'data-autofocus': isNew ? null : true });
+    f.prompt.value = init.prompt;
+    f.context = h('textarea', { class: 'textarea', rows: '2', maxlength: String(lim.context), style: 'min-height:58px' });
+    f.context.value = init.context;
+    f.example = h('input', { type: 'text', class: 'input', value: init.example, maxlength: String(lim.example), autocomplete: 'off' });
+    f.segments = h('input', { type: 'text', class: 'input', value: init.segments.join('｜'), maxlength: String(lim.segments), autocomplete: 'off', oninput: paintSegs });
+    f.step = h('input', { type: 'text', class: 'input input--narrow', value: String(init.step), inputmode: 'numeric', maxlength: '3', autocomplete: 'off' });
+    f.order = h('input', { type: 'text', class: 'input input--narrow', value: init.order === '' || init.order == null ? '' : String(init.order), inputmode: 'decimal', maxlength: '8', autocomplete: 'off' });
+    f.show = h('input', { type: 'checkbox', checked: !init.hidden ? true : null });
+    f.art = h('input', { type: 'text', class: 'input', value: init.art, maxlength: String(lim.art), autocomplete: 'off', list: 'art-list' });
+    f.note = h('input', { type: 'text', class: 'input', value: init.note, maxlength: String(lim.note), autocomplete: 'off' });
+    f.aim = h('textarea', { class: 'textarea', rows: '2', maxlength: String(lim.aim), style: 'min-height:58px' });
+    f.aim.value = init.aim;
+    var segPreview = h('p', { class: 'field__hint', id: 'it-seg-preview' });
+    var wordBox = h('div', { class: 'kindbox' }, field('example', '提案例文（語彙）', f.example, '「この語を使った文を言ってください」と、ことばの次に聞く文です。空欄なら聞きません。'));
+    var sentBox = h('div', { class: 'kindbox' }, field('segments', '文節の区切り', f.segments, '文節のあいだに「｜」を入れます（例：雨が｜降っている）。空欄なら、文全体を1つの欄で答えてもらいます。'), segPreview);
+    function paintKind() { var sent = f.type.value === '例文'; wordBox.style.display = sent ? 'none' : ''; sentBox.style.display = sent ? '' : 'none'; paintSegs(); }
+    function paintSegs() {
+      var parts = f.segments.value.split(/[｜|／\/]/).map(function (s) { return s.trim(); }).filter(Boolean);
+      if (!parts.length) { segPreview.textContent = ''; return; }
+      var plain = function (s) { return String(s).replace(/《[^》]*》/g, '').replace(/[。、．，！？!?「」『』（）()［］\[\]\s｜|／\/・…]/g, ''); };
+      segPreview.textContent = parts.length + ' 文節：' + parts.join(' ／ ') + (plain(parts.join('')) !== plain(f.prompt.value) ? '　※ つなげた文字が、提示語・例文と合いません' : '');
+    }
+    f.prompt.addEventListener('input', paintSegs);
+    paintKind();
+    var body = h('div', { class: 'form' },
+      init.answers ? h('div', { class: 'notice notice--warn', role: 'status' }, h('span', { svg: ICON.warn }), h('span', { text: 'この設問には回答が ' + init.answers + ' 件あります。提示語・例文や文節を変えると、前の回答と新しい文の対応は、調査者が見分ける必要があります。設問IDは変えられません。' })) : null,
+      h('div', { class: 'form__row' },
+        field('id', '設問ID', f.id, lockId ? '回答があるので変えられません。' : (isNew ? '半角の英数字と「-」「_」がおすすめです（例：S045）。' : '変えると、別の設問として扱われます。')),
+        field('type', '種別', f.type)),
+      field('prompt', '提示語・例文', f.prompt, '参加者に「これをなんといいますか？」と見せる、ことばや文です。ふりがなは「鯖《さば》」のように書けます。'),
+      field('context', '場面・意味・読み', f.context, '提示語・例文の下に、小さく出ます（例：読み：あたま、場面：外を見て知らせる）。'),
+      wordBox, sentBox,
+      h('div', { class: 'form__row form__row--3' },
+        field('step', '歩', f.step, '何歩目に出すか（1〜999）。'),
+        field('order', '順', f.order, 'その歩の中での順番。空欄なら最後。'),
+        h('div', { class: 'field' }, h('span', { class: 'field__label', text: '参加者の画面に' }), h('label', { class: 'check', style: 'min-height:40px' }, f.show, '出す'))),
+      h('details', { class: 'morebox' }, h('summary', { class: 'morebox__sum', text: 'くわしい欄（イラスト・記述項目・調査の狙い）' }),
+        field('art', 'イラスト', f.art, '参加者の画面に出す絵の名前（' + ART_NAMES.slice(0, 6).join('、') + ' など）。空欄なら出しません。'),
+        field('note', '記述項目', f.note, '調査者のための覚え書き。参加者には出ません。'),
+        field('aim', '調査の狙い', f.aim, '調査者のための覚え書き。参加者には出ません。')),
+      artList());
+    function idKey(text) { var s = String(text == null ? '' : text); if (s.normalize) s = s.normalize('NFKC'); return s.replace(/\s/g, ''); }
+    function read() {
+      var v = { type: f.type.value, prompt: f.prompt.value.trim(), context: f.context.value.trim(), example: f.example.value.trim(),
+                segments: f.type.value === '例文' ? f.segments.value.trim() : '', step: fold(f.step.value).replace(/\s/g, ''), order: fold(f.order.value).replace(/\s/g, ''),
+                show: f.show.checked, art: f.art.value.trim(), note: f.note.value.trim(), aim: f.aim.value.trim() };
+      if (!lockId) v.id = idKey(f.id.value);                   // 設問IDは、大文字小文字をそのまま（回答があるときは変えないので送らない）
+      return v;
+    }
+    function check(v) {
+      if (!lockId && !v.id) return { msg: '設問IDを入れてください。', el: f.id };
+      if (!lockId && /[｜|／\/,;"'`\\<>=]/.test(v.id)) return { msg: '設問IDに、使えない記号（| / , ; = 引用符 など）が入っています。', el: f.id };
+      if (!v.prompt) return { msg: '提示語・例文を入れてください。', el: f.prompt };
+      if (!/^\d{1,3}$/.test(v.step) || +v.step < 1) return { msg: '歩は 1〜999 の数字にしてください。', el: f.step };
+      if (v.order !== '' && !/^\d{1,4}(\.\d{1,3})?$/.test(v.order)) return { msg: '順は数字にしてください。', el: f.order };
+      return null;
+    }
+    dialog({ title: isNew ? '設問を足す' : '設問を直す', wide: true, body: body, actions: [
+      { label: 'やめる', value: null },
+      { label: isNew ? '足す' : '保存する', kind: 'primary', run: function (close, setError, setBusy) {
+        var v = read(), bad = check(v);
+        if (bad) { setError(bad.msg); try { bad.el.focus(); } catch (e) { /* 何もしない */ } return; }
+        setBusy(true);
+        var payload = isNew ? { fields: v } : { id: it.id, fields: v };
+        mutate(isNew ? 'addItem' : 'setItem', payload).then(function (res) { close(res); }, function (err) {
+          if (failed(err, true)) { close(null); return; }
+          setBusy(false);
+          setError(err.message);
+        });
+      } }
+    ] }).then(function (res) {
+      if (!res) return;
+      var saved = res.item;
+      // まず手もとの一覧を直す（このあとの読み直しがうまくいかなくても、画面に出るように）
+      var idx = -1;
+      for (var i = 0; i < D.items.length; i++) if (D.items[i].id === (isNew ? saved.id : it.id)) { idx = i; break; }
+      var entry = { id: saved.id, type: saved.type, step: saved.step, order: saved.order, prompt: saved.prompt, context: saved.context, example: saved.example, segments: saved.segments,
+                    art: saved.art, note: saved.note, aim: saved.aim, hidden: !!saved.hidden, dup: false, rowNo: saved.rowNo, answers: saved.answers, stat: idx >= 0 ? D.items[idx].stat : [0, 0, 0, 0] };
+      if (idx >= 0) D.items[idx] = entry; else D.items.push(entry);
+      D.items.sort(function (a, b) { return a.step - b.step || (Number(a.order) || 0) - (Number(b.order) || 0) || a.rowNo - b.rowNo; });
+      if (view === 'items') render();
+      toast(isNew ? '設問「' + saved.prompt + '」を足しました。' : '設問を保存しました。' + (res.warnings && res.warnings.length ? ' ' + res.warnings[0] : ''));
+      loadOverview().then(softRender, function (err) { if (!failed(err, true)) toast('保存はできましたが、新しい内容を読みこめませんでした。あとで「更新」を押してください。'); });
+    });
+  }
+  // 「出さない」と「出す」の切りかえ
+  function toggleHidden(it) {
+    var st = state.items;
+    if (st.busy[it.id]) return;
+    var go = function () {
+      st.busy[it.id] = true;
+      if (view === 'items') render();
+      mutate('setItem', { id: it.id, fields: { show: !!it.hidden } }).then(function (res) {
+        delete st.busy[it.id];
+        it.hidden = !!res.item.hidden;
+        if (view === 'items') render();
+        toast(it.hidden ? '「' + it.prompt + '」を出さないようにしました。' : '「' + it.prompt + '」を出すようにしました。');
+        loadOverview().then(softRender, function (err) { failed(err, true); });
+      }, function (err) { delete st.busy[it.id]; if (!failed(err)) { if (view === 'items') render(); } });
+    };
+    if (it.hidden) { go(); return; }
+    dialog({ title: '「' + it.prompt + '」を出さないようにしますか？', body: '参加者の画面に出なくなります。' + (it.answers ? 'これまでの回答（' + it.answers + ' 件）は残ります。' : '') + 'あとから「出す」にもどせます。',
+      actions: [{ label: 'やめる', value: 0 }, { label: '出さないようにする', value: 1, kind: 'danger' }] }).then(function (v) { if (v === 1) go(); });
+  }
+  // 歩の名前とアイコン
+  function editStep(no) {
+    var info = stepInfo(no), lim = limits();
+    var title = h('input', { type: 'text', class: 'input', id: 'step-title', value: info.title, maxlength: String(lim.stepTitle), autocomplete: 'off', 'data-autofocus': true });
+    var icon = h('input', { type: 'text', class: 'input', id: 'step-icon', value: info.icon, maxlength: String(lim.stepIcon), autocomplete: 'off', list: 'art-list' });
+    var body = h('div', { class: 'form' },
+      h('div', { class: 'field' }, h('label', { class: 'field__label', for: 'step-title', text: 'タイトル' }), title, h('p', { class: 'field__hint', text: 'すごろくのマスに出る名前です（例：鹿児島中央駅）。空欄なら番号だけ出ます。' })),
+      h('div', { class: 'field' }, h('label', { class: 'field__label', for: 'step-icon', text: 'アイコン' }), icon, h('p', { class: 'field__hint', text: 'マスに出す絵の名前（' + ART_NAMES.slice(0, 5).join('、') + ' など）。空欄なら番号を出します。' })),
+      artList());
+    dialog({ title: no + '歩目の名前を直す', body: body, actions: [
+      { label: 'やめる', value: null },
+      { label: '保存する', kind: 'primary', run: function (close, setError, setBusy) {
+        var ic2 = icon.value.trim();
+        if (ic2 && !/^[A-Za-z0-9_-]+$/.test(ic2)) { setError('アイコンの名前は、半角の英数字で入れてください。'); return; }
+        setBusy(true);
+        mutate('setStep', { no: no, title: title.value, icon: ic2 }).then(function (res) { close(res.step); }, function (err) {
+          if (failed(err, true)) { close(null); return; }
+          setBusy(false);
+          setError(err.message);
+        });
+      } }
+    ] }).then(function (stp) {
+      if (!stp) return;
+      var found = false;
+      D.steps.forEach(function (s) { if (s.no === stp.no) { s.title = stp.title; s.icon = stp.icon; found = true; } });
+      D.stepRows = D.stepRows || [];
+      var r = D.stepRows.filter(function (x) { return x.no === stp.no; })[0];
+      if (r) { r.title = stp.title; r.icon = stp.icon; } else D.stepRows.push({ no: stp.no, title: stp.title, icon: stp.icon });
+      if (view === 'items') render();
+      toast(stp.no + '歩目の名前を保存しました。');
+      if (!found) loadOverview().then(softRender, function (err) { failed(err, true); });
+    });
+  }
+
+  /* ============================================================
+   * 項目：表から取りこむ
+   * ============================================================ */
+  function blankImport() { return { text: '', stepsText: '', fileName: '', table: null, steps: null, parseError: '', mode: 'replace', plan: null, checking: false, applying: false, error: '' }; }
+  // タブ区切り・カンマ区切りの文字を、表（行の配列）にする。Excel からコピーした「"…"」の中の改行や「""」も読む
+  function parseDelimited(text) {
+    var s = String(text || '').replace(/^﻿/, '');
+    if (!s.trim()) return [];
+    var firstLine = s.split(/\r?\n/)[0];
+    var delim = firstLine.indexOf('\t') >= 0 ? '\t' : ',';
+    var rows = [], row = [], cell = '', i = 0, inQ = false, n = s.length;
+    while (i < n) {
+      var ch = s.charAt(i);
+      if (inQ) {
+        if (ch === '"') { if (s.charAt(i + 1) === '"') { cell += '"'; i += 2; continue; } inQ = false; i++; continue; }
+        cell += ch; i++; continue;
+      }
+      if (ch === '"' && cell === '') { inQ = true; i++; continue; }
+      if (ch === delim) { row.push(cell); cell = ''; i++; continue; }
+      if (ch === '\r') { i++; continue; }
+      if (ch === '\n') { row.push(cell); rows.push(row); row = []; cell = ''; i++; continue; }
+      cell += ch; i++;
+    }
+    row.push(cell); rows.push(row);
+    // 空の行は、行の番号がずれないように空のまま残す（さいごの空の行だけ落とす）
+    rows = rows.map(function (r) { return r.some(function (c) { return String(c).trim() !== ''; }) ? r : []; });
+    while (rows.length && !rows[rows.length - 1].length) rows.pop();
+    return rows;
+  }
+  function filledRows(rows) { var n = 0; for (var i = 0; i < rows.length; i++) if (rows[i].some(function (c) { return String(c == null ? '' : c).trim() !== ''; })) n++; return n; }
+  // ---- Excel（.xlsx）の読みとり：zip をほどいて、中の XML を読む（外部のプログラムは使わない） ----
+  function u8(buf) { return buf instanceof Uint8Array ? buf : new Uint8Array(buf); }
+  function inflateRaw(bytes) {
+    if (typeof DecompressionStream !== 'function') return Promise.reject(new Error('このブラウザでは Excel ファイルを直接読めません。Excel で表をコピーして、下の欄に貼りつけてください。'));
+    var ds = new DecompressionStream('deflate-raw');
+    var stream = new Blob([bytes]).stream().pipeThrough(ds);
+    return new Response(stream).arrayBuffer().then(u8);
+  }
+  function unzip(buf) {
+    var b = u8(buf), dv = new DataView(b.buffer, b.byteOffset, b.byteLength);
+    var eocd = -1;
+    for (var p = b.length - 22; p >= Math.max(0, b.length - 65557); p--) if (dv.getUint32(p, true) === 0x06054b50) { eocd = p; break; }
+    if (eocd < 0) throw new Error('Excel ファイル（.xlsx）として読めませんでした。');
+    var count = dv.getUint16(eocd + 10, true), cdOff = dv.getUint32(eocd + 16, true);
+    var entries = {}, q = cdOff;
+    for (var e = 0; e < count; e++) {
+      if (dv.getUint32(q, true) !== 0x02014b50) throw new Error('Excel ファイルの中身が読めませんでした。');
+      var method = dv.getUint16(q + 10, true), csize = dv.getUint32(q + 20, true), nlen = dv.getUint16(q + 28, true), xlen = dv.getUint16(q + 30, true), clen = dv.getUint16(q + 32, true), off = dv.getUint32(q + 42, true);
+      var name = new TextDecoder('utf-8').decode(b.subarray(q + 46, q + 46 + nlen));
+      entries[name] = { method: method, csize: csize, off: off };
+      q += 46 + nlen + xlen + clen;
+    }
+    function read(name) {
+      var ent = entries[name];
+      if (!ent) return Promise.resolve(null);
+      var lo = ent.off;
+      if (dv.getUint32(lo, true) !== 0x04034b50) return Promise.reject(new Error('Excel ファイルの中身が読めませんでした。'));
+      var n2 = dv.getUint16(lo + 26, true), x2 = dv.getUint16(lo + 28, true);
+      var start = lo + 30 + n2 + x2, data = b.subarray(start, start + ent.csize);
+      if (ent.method === 0) return Promise.resolve(data);
+      if (ent.method === 8) return inflateRaw(data);
+      return Promise.reject(new Error('この Excel ファイルの圧縮の形には対応していません。'));
+    }
+    return { names: Object.keys(entries), read: read };
+  }
+  function xmlOf(bytes) {
+    var text = new TextDecoder('utf-8').decode(bytes);
+    var doc = new DOMParser().parseFromString(text, 'application/xml');
+    if (doc.getElementsByTagName('parsererror').length) throw new Error('Excel ファイルの中身が読めませんでした。');
+    return doc;
+  }
+  function tagsOf(node, name) {
+    // 名前空間があってもなくても拾う
+    var out = node.getElementsByTagNameNS('*', name);
+    return out.length ? out : node.getElementsByTagName(name);
+  }
+  function textOf(node) {
+    // 日本語の Excel は、ふりがな（<rPh>）も文字といっしょにしまっている。それは本文ではないので入れない
+    var ts = tagsOf(node, 't'), s = '';
+    for (var i = 0; i < ts.length; i++) {
+      var p = ts[i].parentNode, ruby = false;
+      while (p && p !== node) { if (p.localName === 'rPh') { ruby = true; break; } p = p.parentNode; }
+      if (!ruby) s += ts[i].textContent;
+    }
+    return s;
+  }
+  function colIndex(ref) {
+    var m = /^([A-Z]+)/.exec(String(ref || '')), n = 0;
+    if (!m) return -1;
+    for (var i = 0; i < m[1].length; i++) n = n * 26 + (m[1].charCodeAt(i) - 64);
+    return n - 1;
+  }
+  function readXlsx(buf) {
+    var zip;
+    try { zip = unzip(buf); } catch (e) { return Promise.reject(e); }
+    var shared = [];
+    return zip.read('xl/sharedStrings.xml').then(function (ss) {
+      if (ss) { var sis = tagsOf(xmlOf(ss), 'si'); for (var i = 0; i < sis.length; i++) shared.push(textOf(sis[i])); }
+      return Promise.all([zip.read('xl/workbook.xml'), zip.read('xl/_rels/workbook.xml.rels')]);
+    }).then(function (parts) {
+      if (!parts[0]) throw new Error('Excel ファイル（.xlsx）として読めませんでした。');
+      var wb = xmlOf(parts[0]), rels = parts[1] ? xmlOf(parts[1]) : null;
+      var target = {};
+      if (rels) { var rs = tagsOf(rels, 'Relationship'); for (var r = 0; r < rs.length; r++) target[rs[r].getAttribute('Id')] = rs[r].getAttribute('Target'); }
+      var sheets = tagsOf(wb, 'sheet'), list = [];
+      for (var s = 0; s < sheets.length; s++) {
+        var rid = sheets[s].getAttribute('r:id') || sheets[s].getAttributeNS('http://schemas.openxmlformats.org/officeDocument/2006/relationships', 'id');
+        var path = target[rid] || ('worksheets/sheet' + (s + 1) + '.xml');
+        path = path.replace(/^\//, '').replace(/^xl\//, '');
+        list.push({ name: sheets[s].getAttribute('name') || ('Sheet' + (s + 1)), path: 'xl/' + path });
+      }
+      return Promise.all(list.map(function (sh) {
+        return zip.read(sh.path).then(function (bytes) {
+          if (!bytes) return { name: sh.name, rows: [] };
+          var doc = xmlOf(bytes), rowsEl = tagsOf(doc, 'row'), rows = [];
+          for (var i = 0; i < rowsEl.length; i++) {
+            var cells = tagsOf(rowsEl[i], 'c'), line = [];
+            var rowNo = parseInt(rowsEl[i].getAttribute('r'), 10);           // 空の行がとばされていても、Excel の行の番号に合わせる
+            if (rowNo >= 1) while (rows.length < rowNo - 1) rows.push([]);
+            for (var c = 0; c < cells.length; c++) {
+              var cell = cells[c], idx = colIndex(cell.getAttribute('r')), t = cell.getAttribute('t') || '', v = '';
+              var vEl = tagsOf(cell, 'v')[0];
+              if (t === 's') v = vEl ? (shared[parseInt(vEl.textContent, 10)] || '') : '';
+              else if (t === 'inlineStr') v = textOf(cell);
+              else if (t === 'b') v = vEl ? vEl.textContent === '1' : '';
+              else if (t === 'str' || t === 'e') v = vEl ? vEl.textContent : '';
+              else v = vEl ? (vEl.textContent === '' ? '' : Number(vEl.textContent)) : '';
+              if (typeof v === 'number' && isNaN(v)) v = vEl.textContent;
+              if (typeof v === 'number' && isFinite(v)) v = Math.round(v * 1e9) / 1e9;   // 1.1000000000000001 のような数は丸める
+              if (idx < 0) idx = line.length;
+              while (line.length < idx) line.push('');
+              line[idx] = v;
+            }
+            rows.push(line);
+          }
+          return { name: sh.name, rows: rows };
+        });
+      }));
+    });
+  }
+  // 行の配列 → { head, rows }（最初の空でない行を見出しにする）
+  function tableOf(rows) {
+    var i = 0;
+    while (i < rows.length && !rows[i].some(function (c) { return String(c == null ? '' : c).trim() !== ''; })) i++;
+    if (i >= rows.length) return null;
+    var head = rows[i].map(function (c) { return String(c == null ? '' : c).trim(); });
+    while (head.length && !head[head.length - 1]) head.pop();
+    var body = [];
+    for (var r = i + 1; r < rows.length; r++) {
+      var line = rows[r].slice(0, head.length);
+      while (line.length < head.length) line.push('');
+      body.push(line.some(function (c) { return String(c == null ? '' : c).trim() !== ''; }) ? line.map(function (c) { return c == null ? '' : c; }) : []);   // 空の行は空のまま（行の番号がずれないように）
+    }
+    while (body.length && !body[body.length - 1].length) body.pop();
+    return { head: head, rows: body, headRow: i + 1 };
+  }
+  function pickSheet(sheets, name) {
+    for (var i = 0; i < sheets.length; i++) if (sheets[i].name === name) return sheets[i];
+    return null;
+  }
+  function useFile(file) {
+    var im = state.items.importing;
+    im.fileName = file.name; im.parseError = ''; im.table = null; im.steps = null; im.plan = null; im.error = ''; im.text = ''; im.stepsText = '';
+    var done = function (err) { if (err) im.parseError = err.message || String(err); if (view === 'import') render(); };
+    if (/\.xlsx$/i.test(file.name)) {
+      file.arrayBuffer().then(readXlsx).then(function (sheets) {
+        var main = pickSheet(sheets, '項目') || sheets[0];
+        if (!main) throw new Error('シートが見つかりませんでした。');
+        im.table = tableOf(main.rows);
+        if (!im.table) throw new Error('「' + main.name + '」シートが空です。');
+        var st = pickSheet(sheets, '歩');
+        if (st) { var t2 = tableOf(st.rows); if (t2) im.steps = t2.rows.filter(function (r) { return r.length; }); }
+        done();
+      }, done);
+    } else if (/\.(csv|tsv|txt)$/i.test(file.name)) {
+      // Excel が書き出す CSV は Shift_JIS のことが多いので、UTF-8 として読めなければ Shift_JIS として読む
+      file.arrayBuffer().then(function (buf) {
+        var text, b = new Uint8Array(buf);
+        if (b.length >= 2 && b[0] === 0xFF && b[1] === 0xFE) text = new TextDecoder('utf-16le').decode(buf);        // Excel の「Unicode テキスト」
+        else if (b.length >= 2 && b[0] === 0xFE && b[1] === 0xFF) text = new TextDecoder('utf-16be').decode(buf);
+        else {
+          try { text = new TextDecoder('utf-8', { fatal: true }).decode(buf); }
+          catch (e) { text = new TextDecoder('shift_jis').decode(buf); }
+        }
+        im.table = tableOf(parseDelimited(text));
+        if (!im.table) throw new Error('ファイルが空です。');
+        done();
+      }, done);
+    } else {
+      done(new Error('Excel（.xlsx）か、CSV・タブ区切り（.csv .tsv .txt）のファイルをえらんでください。'));
+    }
+  }
+  function useText() {
+    var im = state.items.importing;
+    im.fileName = ''; im.parseError = ''; im.plan = null; im.error = ''; im.table = null; im.steps = null;
+    if (im.text.trim()) im.table = tableOf(parseDelimited(im.text));
+    if (im.stepsText.trim()) { var t2 = tableOf(parseDelimited(im.stepsText)); im.steps = t2 ? t2.rows.filter(function (r) { return r.length; }) : null; }
+  }
+  VIEWS['import'] = function () {
+    var st = state.items, im = st.importing;
+    var lim = limits();
+    var fileInput = h('input', { type: 'file', id: 'import-file', class: 'sr', accept: '.xlsx,.csv,.tsv,.txt', onchange: function (e) { var f = e.target.files && e.target.files[0]; if (f) useFile(f); } });
+    var fileBtn = h('label', { class: 'btn', for: 'import-file', tabindex: '0', role: 'button', onkeydown: function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fileInput.click(); } } }, h('span', { svg: ICON.folder }), 'ファイルをえらぶ（Excel・CSV）');
+    var textarea = h('textarea', { class: 'textarea textarea--mono', id: 'import-text', rows: '6', placeholder: '歩\t順\t設問ID\t種別\t提示語・例文\t…', disabled: im.checking || im.applying,
+      oninput: function (e) { im.text = e.target.value; useText(); paintParsed(); } });
+    textarea.value = im.text;
+    var stepsArea = h('textarea', { class: 'textarea textarea--mono', id: 'import-steps', rows: '3', placeholder: '歩\tタイトル\tアイコン', disabled: im.checking || im.applying,
+      oninput: function (e) { im.stepsText = e.target.value; useText(); paintParsed(); } });
+    stepsArea.value = im.stepsText;
+    var parsed = h('p', { class: 'field__hint', id: 'import-parsed', role: 'status' });
+    var checkBtn = h('button', { type: 'button', class: 'btn btn--primary', id: 'import-check', disabled: !im.table || im.checking || im.applying, onclick: checkImport }, im.checking ? '確かめています…' : '下見する');
+    function paintParsed() {
+      var t = im.table;
+      checkBtn.disabled = !t || im.checking || im.applying;    // 貼りつけたら、すぐに「下見する」を押せるように
+      if (!im.plan) { var oldPlan = byId('plan'); if (oldPlan && oldPlan.parentNode) oldPlan.parentNode.removeChild(oldPlan); }   // 表を直したら、前の下見は消す
+      if (im.parseError) { parsed.className = 'field__hint savebar__msg--bad'; parsed.textContent = im.parseError; return; }
+      parsed.className = 'field__hint';
+      if (!t) { parsed.textContent = im.fileName ? '読みこんでいます…' : 'まだ表がありません。'; return; }
+      parsed.textContent = (im.fileName ? '「' + im.fileName + '」：' : '貼りつけた表：') + filledRows(t.rows) + ' 行（見出し：' + t.head.join('、') + '）' + (im.steps ? '　歩の表：' + filledRows(im.steps) + ' 行' : '');
+    }
+    paintParsed();
+    var modeBox = h('div', { class: 'modes' }, [
+      ['replace', 'ぜんぶ入れかえる', '表にある設問だけにします。表にない設問は消えます（回答のある設問は、消さずに「出さない」にして残します）。'],
+      ['merge', '足す・直すだけ', '表にある設問を、足したり直したりします。表にない設問は、そのままです。']
+    ].map(function (m) {
+      var r = h('input', { type: 'radio', name: 'import-mode', value: m[0], checked: im.mode === m[0] ? true : null, disabled: im.checking || im.applying, onchange: function () { im.mode = m[0]; im.plan = null; render(); } });
+      return h('label', { class: 'mode' + (im.mode === m[0] ? ' mode--on' : '') }, r, h('span', { class: 'mode__name', text: m[1] }), h('span', { class: 'mode__hint', text: m[2] }));
+    }));
+    var sourceCard = h('section', { class: 'card' },
+      h('div', { class: 'card__head' }, h('h2', { class: 'card__title', text: '1. 取りこむ表' })),
+      h('p', { class: 'field__hint', style: 'margin:0 0 10px', text: '「項目」シートと同じ見出し（歩・順・設問ID・種別・提示語・例文・場面・意味・読み・提案例文（語彙）・文節の区切り・イラスト・出す・記述項目・調査の狙い）の表を取りこみます。抜粋ツールが作った Excel なら、そのままえらべます（「歩」シートの名前もいっしょに入ります）。' }),
+      h('div', { class: 'linkrow', style: 'align-items:center' }, fileBtn, fileInput, h('span', { class: 'muted', style: 'font-size:13.5px', text: im.fileName ? im.fileName : 'まだえらんでいません' })),
+      h('p', { class: 'field__label', style: 'margin:16px 0 4px', text: 'または、Excel の表をコピーして、ここに貼りつける' }),
+      textarea,
+      h('details', { class: 'morebox', open: im.stepsText ? true : null }, h('summary', { class: 'morebox__sum', text: '歩の名前の表も貼る（任意）' }),
+        h('p', { class: 'field__hint', style: 'margin:4px 0 6px', text: '「歩」シート（歩・タイトル・アイコン）をコピーして貼りつけます。貼らなければ、いまの名前のままです。' }), stepsArea),
+      parsed);
+    var modeCard = h('section', { class: 'card' },
+      h('div', { class: 'card__head' }, h('h2', { class: 'card__title', text: '2. 取りこみ方' })),
+      modeBox,
+      h('div', { class: 'linkrow', style: 'margin-top:14px;align-items:center' }, checkBtn, h('span', { class: 'muted', style: 'font-size:13.5px', text: '書きこむ前に、何が変わるかを確かめます。' })),
+      im.error ? h('p', { class: 'dialog__error', role: 'alert', text: im.error }) : null);
+    var planCard = im.plan ? planView(im.plan) : null;
+    return h('div', { class: 'stack' },
+      h('header', { class: 'head' }, h('div', {}, h('h1', { class: 'head__title', tabindex: '-1', text: '表から取りこむ' }), h('p', { class: 'head__sub', text: '設問の表（Excel・CSV・貼りつけ）を確かめてから、「項目」シートに書きこみます。' })),
+        h('div', { class: 'head__tools' }, h('button', { type: 'button', class: 'btn btn--small', id: 'import-back', disabled: im.applying, onclick: function () { show('items'); } }, '項目にもどる'))),
+      sourceCard, modeCard, planCard);
+  };
+  function checkImport() {
+    var im = state.items.importing;
+    if (!im.table || im.checking) return;
+    im.checking = true; im.error = ''; im.plan = null;
+    render();
+    call('checkItems', { head: im.table.head, rows: im.table.rows, steps: im.steps, mode: im.mode }).then(function (res) {
+      im.checking = false;
+      im.plan = res.plan;
+      fixRowNumbers(im.plan, im.table.headRow || 1);
+      render();
+      var el = byId('plan-title');
+      if (el) { try { el.focus({ preventScroll: true }); el.scrollIntoView({ block: 'start', behavior: 'smooth' }); } catch (e) { /* 何もしない */ } }
+    }, function (err) {
+      im.checking = false;
+      if (failed(err, true)) return;
+      im.error = err.message;
+      render();
+    });
+  }
+  // 下見の「行」は、見出しが1行目にあるものとして数えてある。見出しがもっと下の行にあれば、そのぶんずらして Excel の行の番号に合わせる
+  function fixRowNumbers(plan, headRow) {
+    if (!plan || headRow <= 1) return;
+    ['rowErrors', 'rowWarnings'].forEach(function (k) { (plan[k] || []).forEach(function (r) { r.row += headRow - 1; }); });
+  }
+  function planView(plan) {
+    var im = state.items.importing;
+    var d = plan.diff || { added: [], changed: [], removed: [], unchanged: 0 };
+    var c = plan.counts || {};
+    function few(list, max, render) {
+      var rows = list.slice(0, max).map(render);
+      if (list.length > max) rows.push(h('p', { class: 'field__hint', text: 'ほか ' + (list.length - max) + ' 件' }));
+      return rows;
+    }
+    function miniTable(heads, rows) {
+      return h('div', { class: 'newlist newlist--tall' }, h('table', {}, h('thead', {}, h('tr', {}, heads.map(function (t) { return h('th', { text: t }); }))), h('tbody', {}, rows)));
+    }
+    var parts = [];
+    parts.push(h('div', { class: 'grid grid--tiles plan__tiles' },
+      tile('表の設問', c.file || 0, '件', plan.mode === 'replace' ? 'ぜんぶ入れかえる' : '足す・直すだけ'),
+      tile('新しく足す', d.added.length, '件', ''),
+      tile('直す', d.changed.length, '件', c.answersTouched ? '回答のある文の変更 ' + c.answersTouched + ' 件' : ''),
+      tile('消す', d.removed.length, '件', d.removed.filter(function (r) { return r.kept; }).length ? '回答のあるものは「出さない」で残す' : '')));
+    if (plan.errors && plan.errors.length) {
+      parts.push(h('div', { class: 'notice notice--bad', role: 'alert' }, h('span', { svg: ICON.warn }), h('div', { class: 'notice__grow' },
+        h('p', { text: '直さないと取りこめません。' }), h('ul', { class: 'bullets' }, plan.errors.map(function (t) { return h('li', { text: t }); })))));
+      if (plan.rowErrors && plan.rowErrors.length) {
+        parts.push(miniTable(['行', '設問ID', '直すところ'], few(plan.rowErrors, 80, function (r) { return h('tr', {}, h('td', { class: 'num', text: r.row }), h('td', { text: r.id || '' }), h('td', { text: r.messages.join(' ') })); })));
+      }
+    }
+    if (plan.warnings && plan.warnings.length) {
+      parts.push(h('div', { class: 'notice notice--warn' }, h('span', { svg: ICON.warn }), h('div', { class: 'notice__grow' },
+        h('p', { text: '取りこめますが、念のため確かめてください。' }), h('ul', { class: 'bullets' }, plan.warnings.map(function (t) { return h('li', { text: t }); })))));
+    }
+    if (plan.rowWarnings && plan.rowWarnings.length) {
+      parts.push(h('details', { class: 'morebox' }, h('summary', { class: 'morebox__sum', text: '行ごとの注意（' + plan.rowWarnings.length + '）' }),
+        miniTable(['行', '設問ID', '注意'], few(plan.rowWarnings, 80, function (r) { return h('tr', {}, h('td', { class: 'num', text: r.row }), h('td', { text: r.id || '' }), h('td', { text: r.messages.join(' ') })); }))));
+    }
+    if (plan.head && plan.head.unused && plan.head.unused.length) parts.push(h('p', { class: 'field__hint', text: '使わない列：' + plan.head.unused.join('、') + '（「項目」シートにない見出しなので、取りこみません）' }));
+    if (d.changed.length) parts.push(h('details', { class: 'morebox', open: true }, h('summary', { class: 'morebox__sum', text: '直す設問（' + d.changed.length + '）' }),
+      miniTable(['設問ID', '提示語・例文', '変わる欄', '回答'], few(d.changed, 60, function (r) {
+        return h('tr', {}, h('td', { text: r.id }), h('td', {}, r.before !== r.prompt ? [h('span', { class: 'muted', text: r.before }), ' → ', r.prompt] : r.prompt), h('td', { text: r.fields.join('、') }), h('td', { class: 'num', text: r.answers ? r.answers + '件' : '' }));
+      }))));
+    if (d.removed.length) parts.push(h('details', { class: 'morebox', open: true }, h('summary', { class: 'morebox__sum', text: '消す設問（' + d.removed.length + '）' }),
+      miniTable(['設問ID', '提示語・例文', '回答', 'どうなるか'], few(d.removed, 60, function (r) {
+        return h('tr', {}, h('td', { text: r.id }), h('td', { text: r.prompt }), h('td', { class: 'num', text: r.answers ? r.answers + '件' : '' }), h('td', { text: r.kept ? '「出さない」にして残す' : '消す' }));
+      }))));
+    if (d.added.length) parts.push(h('details', { class: 'morebox', open: d.added.length <= 20 }, h('summary', { class: 'morebox__sum', text: '新しく足す設問（' + d.added.length + '）' }),
+      miniTable(['設問ID', '提示語・例文', '歩'], few(d.added, 60, function (r) { return h('tr', {}, h('td', { text: r.id }), h('td', { text: r.prompt }), h('td', { class: 'num', text: r.step + '歩目' })); }))));
+    if (plan.steps && plan.steps.length) parts.push(h('p', { class: 'field__hint', text: '歩の名前：' + plan.steps.map(function (s) { return s.no + '歩目「' + s.title + '」'; }).join('、') }));
+    var applyBtn = h('button', { type: 'button', class: 'btn btn--primary', id: 'import-apply', disabled: !plan.ok || im.applying, onclick: applyImport }, im.applying ? '取りこんでいます…' : 'この内容で取りこむ');
+    parts.push(h('div', { class: 'linkrow', style: 'margin-top:16px;align-items:center' }, applyBtn,
+      h('span', { class: 'muted', style: 'font-size:13.5px', text: plan.ok ? '取りこむ前に、いまの「項目」「歩」シートの控えをとります。' : '上の「直すところ」を直してから、もう一度「下見する」を押してください。' })));
+    return h('section', { class: 'card', id: 'plan' },
+      h('div', { class: 'card__head' }, h('h2', { class: 'card__title', id: 'plan-title', tabindex: '-1', text: '3. 下見：' + (plan.ok ? 'このように変わります' : '取りこめません') })),
+      h('div', { class: 'stack' }, parts));
+  }
+  function applyImport() {
+    var im = state.items.importing;
+    if (!im.plan || !im.plan.ok || im.applying) return;
+    var d = im.plan.diff, c = im.plan.counts;
+    var risky = (c.answersTouched > 0) || d.removed.length > 0;
+    var go = function () {
+      im.applying = true; im.error = '';
+      render();
+      mutate('importItems', { head: im.table.head, rows: im.table.rows, steps: im.steps, mode: im.mode, confirm: true }).then(function (res) {
+        var done = res.written + ' 件を取りこみました' + (res.hiddenKept ? '（回答のある ' + res.hiddenKept + ' 件は「出さない」にして残しました）' : '') + '。' +
+          (res.backups && res.backups.length ? '控え：' + res.backups.join('、') + '。' : '');
+        state.items.importing = blankImport();                 // 次に開いたときは、まっさらな状態から
+        loadOverview().then(function () { show('items'); toast(done); }, function (err) { if (!failed(err, true)) { show('items'); toast('取りこめましたが、新しい内容を読みこめませんでした。あとで「更新」を押してください。'); } });
+      }, function (err) {
+        im.applying = false;
+        if (failed(err, true)) return;
+        im.error = err.message;
+        im.plan = null;
+        render();
+      });
+    };
+    if (!risky) { go(); return; }
+    var lines = [];
+    if (c.answersTouched > 0) lines.push('回答のある設問の文が変わります（回答 ' + c.answersTouched + ' 件）。');
+    if (d.removed.length) lines.push(d.removed.length + ' 件の設問が一覧から消えます' + (d.removed.some(function (r) { return r.kept; }) ? '（回答のあるものは「出さない」にして残します）' : '') + '。');
+    lines.push('取りこむ前に、いまの「項目」「歩」シートの控えをとります。');
+    dialog({ title: 'この内容で取りこみますか？', body: h('div', {}, lines.map(function (t) { return h('p', { text: t }); })),
+      actions: [{ label: 'やめる', value: 0 }, { label: '取りこむ', value: 1, kind: 'danger' }] }).then(function (v) { if (v === 1) go(); });
+  }
 
   /* ============================================================
    * 設定
