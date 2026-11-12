@@ -508,14 +508,18 @@ h1:focus, h1:focus-visible { outline: none; }
 }
 
 /* ---------- 案内役 ---------- */
-.daikon { width: 100%; height: auto; overflow: visible; }
-.daikon--wave .daikon__arm--r { transform-box: fill-box; transform-origin: 0% 100%; animation: ks-wave 900ms ease-in-out 3 alternate; }
-.daikon--listen .daikon__sound path { animation: ks-blink 1.4s ease-in-out infinite; }
-.daikon--listen .daikon__sound path:nth-child(2) { animation-delay: 250ms; }
+.mascot { width: 100%; height: auto; overflow: visible; }
+.mascot--wave .mascot__arm--r { transform-box: fill-box; transform-origin: 0% 100%; animation: ks-wave 900ms ease-in-out 3 alternate; }
+.mascot--listen .mascot__sound path { animation: ks-blink 1.4s ease-in-out infinite; }
+.mascot--listen .mascot__sound path:nth-child(2) { animation-delay: 250ms; }
+.mascot--happa .mascot__tuft, .mascot--maru .mascot__tuft { transform-box: fill-box; transform-origin: 50% 100%; animation: ks-sway 2.2s ease-in-out infinite alternate; }
+.mascot--listen .mascot__ear { transform-box: fill-box; transform-origin: 20% 90%; animation: ks-sway 1.2s ease-in-out infinite alternate; }
+.hill { width: 100%; height: auto; }
 
 @keyframes ks-ring { 0% { opacity: 0.9; transform: scale(0.9); } 100% { opacity: 0; transform: scale(1.18); } }
 @keyframes ks-bob { from { transform: translateY(0); } to { transform: translateY(-6px); } }
 @keyframes ks-wave { from { transform: rotate(0deg); } to { transform: rotate(-22deg); } }
+@keyframes ks-sway { from { transform: rotate(-6deg); } to { transform: rotate(6deg); } }
 @keyframes ks-blink { 0%, 100% { opacity: 0.25; } 50% { opacity: 1; } }
 @keyframes ks-pop { 0% { transform: scale(0); } 100% { transform: scale(1); } }
 @keyframes ks-jump { 0% { transform: translateY(40px) scale(0.6); opacity: 0; } 100% { transform: translateY(0) scale(1); opacity: 1; } }

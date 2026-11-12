@@ -29,11 +29,28 @@ function embed(code, html) {
   return code.slice(0, a) + adminBlock(html) + code.slice(b + END.length);
 }
 
-module.exports = { adminBlock, embed, BEGIN, END };
+// 案内役の絵（js/mascots.js）を、管理画面の中に写す（参加者のサイトと、いつも同じ絵になるように）
+const M_BEGIN = '/* KS:MASCOTS:BEGIN', M_END = '/* KS:MASCOTS:END */';
+function withMascots(html, mascotsJs) {
+  const a = html.indexOf(M_BEGIN), b = html.indexOf(M_END);
+  if (a < 0 || b < a) throw new Error('gas/admin.html に、案内役の絵を写す場所（' + M_BEGIN + ' 〜 ' + M_END + '）がありません');
+  const lineEnd = html.indexOf('*/', a) + 2;                       // BEGIN の行のコメントの終わり
+  const body = String(mascotsJs).replace(/\r\n?/g, '\n').replace(/<\/script/gi, '<\\/script');
+  return html.slice(0, lineEnd) + '\n' + body.trim() + '\n' + html.slice(b);
+}
+
+module.exports = { adminBlock, embed, withMascots, BEGIN, END };
 
 if (require.main === module) {
   const codePath = path.join(root, 'gas', 'Code.gs');
-  const html = fs.readFileSync(path.join(root, 'gas', 'admin.html'), 'utf8');
+  const htmlPath = path.join(root, 'gas', 'admin.html');
+  const mascots = fs.readFileSync(path.join(root, 'js', 'mascots.js'), 'utf8');
+  const html0 = fs.readFileSync(htmlPath, 'utf8');
+  const html = withMascots(html0, mascots);
+  if (html !== html0) {
+    if (process.argv.includes('--check')) { console.error('gas/admin.html の中の案内役の絵が、js/mascots.js と違います。node tools/build-gas.js を実行してください。'); process.exit(1); }
+    fs.writeFileSync(htmlPath, html);
+  }
   const code = fs.readFileSync(codePath, 'utf8');
   if (html.split('"__KS_BOOT__"').length !== 2) {
     console.error('gas/admin.html に、はじめの情報を入れる場所 "__KS_BOOT__" が、ちょうど1つ必要です');

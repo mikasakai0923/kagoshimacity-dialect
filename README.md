@@ -28,9 +28,11 @@
 
 日々の運用（管理画面の使い方、参加者の登録、項目の書きかえ、回答の見方）→ [docs/operation.md](docs/operation.md)
 
+ほかの地域・ほかの調査でも使う（サイトは1つ、保存先は調査ごと）→ [docs/for-others.md](docs/for-others.md)
+
 ## サイトの文章を変える
 
-紹介ページの文章、サイトの名前、問い合わせ先は `config.js` に書いてあります。`" "` の中だけを書きかえてください。
+紹介ページの文章、サイトの名前、問い合わせ先は `config.js` に書いてあります。`" "` の中だけを書きかえてください。Google 側の「設定」シート（管理画面の「設定」）に同じ項目があり、そちらに書くと `config.js` より優先されます。案内役（キャラクター）と景色も、そこでえらべます。
 
 設問の上に出る教示文や質問文は、Google スプレッドシートの「設定」シートで変えられます。
 
@@ -67,10 +69,10 @@ Google の実物と完全に同じではなく、テストに使うブラウザ�
 公開前には、Google の実物と、実物のスマートフォン（iPhone・Android）での確認が必要です（[docs/setup-google.md](docs/setup-google.md) の手順7）。
 管理画面も同じで、「持ち主だけが開ける」ことや、印刷・録音の再生が Google の実物の中で動くことは、実物で確かめる必要があります。
 
-JavaScript や CSS を直したときは、`index.html` の `?v=7` の数字を増やしてください（古いファイルが読まれ続けるのを防ぎます）。
+JavaScript や CSS を直したときは、`index.html` の `?v=8` の数字を増やしてください（古いファイルが読まれ続けるのを防ぎます）。
 
 ## 使わせていただいているもの
 
 - 絵文字のイラスト：[Twemoji](https://github.com/jdecked/twemoji)（CC BY 4.0）。くわしくは `images/icons/CREDITS.txt`
 - 文字：[Zen Maru Gothic](https://github.com/googlefonts/zen-marugothic)、[Mochiy Pop One](https://github.com/fontdasu/Mochiypop)（SIL Open Font License 1.1）。ライセンス文は `fonts/` の各フォルダ
-- 案内役（桜島大根）、桜島、地図の絵は、このサイト用に描いたものです
+- 案内役（桜島大根・まる・はっぱ・黒と白のフレンチブルドッグ）、桜島、丘と木、地図の絵は、このサイト用に描いたものです。案内役と景色は、管理画面の「設定」でえらべます

@@ -4,6 +4,15 @@
   var KS = window.KS = window.KS || {};
 
   KS.DEMO = {
+    // 見た目。お試しモードでは、アドレスに ?mascot=まる&scenery=ノーマル のようにつけると試せる
+    look: (function () {
+      var q = {};
+      String(window.location.search || '').replace(/^\?/, '').split('&').forEach(function (kv) {
+        var m = /^([^=]+)=(.*)$/.exec(kv);
+        if (m) { try { q[decodeURIComponent(m[1])] = decodeURIComponent(m[2]); } catch (e) { /* 何もしない */ } }
+      });
+      return { mascot: q.mascot || '', scenery: q.scenery || '', name: q.name || '' };
+    })(),
     settings: {
       instruction: 'あなたの自然な方言（小学校のころの同級生など、親しい人と話す時のことば）で何というか教えてください。',
       wordQuestion: '「{語}」のことをなんといいますか？',

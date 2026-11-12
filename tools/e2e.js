@@ -807,10 +807,157 @@ const PNG_1PX = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUl
     test.page = page;
   });
 
+  console.log('見た目');
+  await test('設定の案内役・景色・名前・題名が、ログインの前の紹介ページにも、地図にも出る。保存先が答えないときは config.js の見た目で動く', async () => {
+    const set = world.ss.getSheetByName('設定');
+    const rowOf = key => set.rows.findIndex(x => x[0] === key) + 1;
+    set.getRange(rowOf('案内役'), 2).setValue('はっぱ'); set.getRange(rowOf('案内役の名前'), 2).setValue('はっぱ太郎');
+    set.getRange(rowOf('景色'), 2).setValue('ノーマル'); set.getRange(rowOf('サイトの名前'), 2).setValue('ことば さんぽ');
+    set.getRange(rowOf('紹介のことば'), 2).setValue('ふだんのことばを教えてください。'); set.getRange(rowOf('実施者'), 2).setValue('○○大学');
+    const p2 = await newPage();
+    test.page = p2;
+    await p2.goto(`${site}/`);
+    await p2.waitForSelector('.hero-art');
+    await p2.waitForFunction(() => !!document.querySelector('.hero-art .mascot--happa'), null, { timeout: 10000 });
+    assert.strictEqual(await p2.title(), 'ことば さんぽ');
+    assert.deepStrictEqual(await p2.locator('.hero__title-line').allInnerTexts(), ['ことば', 'さんぽ']);
+    assert.strictEqual(await p2.locator('.hero__lead').innerText(), 'ふだんのことばを教えてください。');
+    assert.ok(/はっぱ太郎/.test(await p2.locator('.hero-art').innerHTML()), '案内役の名前の札が出ない');
+    assert.ok(/すごろくの道を歩いて大きな木へ/.test(await p2.locator('.hero-art').getAttribute('aria-label')));
+    assert.ok(/実施：○○大学/.test(await p2.locator('.intro').innerText()));
+    await shot(p2, 'look-01-intro-happa');
+    await login(p2, people[6]);
+    await p2.waitForSelector('.board');
+    assert.strictEqual(await p2.locator('.journey__art .hill').count(), 1, '地図の景色がノーマルでない');
+    assert.ok((await p2.locator('.board__mascot svg').getAttribute('class')).indexOf('mascot--happa') >= 0);
+    assert.ok(/大きな木/.test(await p2.locator('.tile--goal').getAttribute('aria-label') + (await p2.locator('.tile-label', { hasText: 'ゴール' }).innerText())));
+    await shot(p2, 'look-02-map-happa');
+    // 次に開いたときは、保存先に聞く前から、その見た目で始まる（端末にとっておいたもの）
+    world.control.runDelayMs = 3000;
+    await p2.goto(`${site}/?again=1#/`);                      // 読みこみ直す（#だけの変更では、読みこみ直されない）
+    await p2.waitForSelector('.hero-art');
+    assert.strictEqual(await p2.locator('.hero-art .mascot--happa').count(), 1, 'とっておいた見た目で始まらない');
+    assert.strictEqual(await p2.title(), 'ことば さんぽ');
+    world.control.runDelayMs = 0;
+    // もとにもどすと、参加者の画面ももどる
+    for (const k of ['案内役', '案内役の名前', '景色', 'サイトの名前', '紹介のことば', '実施者']) set.getRange(rowOf(k), 2).setValue(k === '案内役' ? '桜島大根' : (k === '景色' ? '鹿児島' : ''));
+    await p2.goto(`${site}/?again=2#/`);
+    await p2.waitForFunction(() => !!document.querySelector('.hero-art .mascot--daikon') && document.title === 'かごしま ことばさんぽ', null, { timeout: 10000 });
+    await p2.context().close();
+    test.page = page;
+  });
+
+  await test('アドレスに ?s=（デプロイID）がついていると、その保存先につながる（サイトは1つ、保存先は調査ごと）。サイトの中を移動しても ?s= は残る', async () => {
+    const ID = 'AKfycbTEST' + 'x'.repeat(40);
+    const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, locale: 'ja-JP' });
+    const p3 = await ctx.newPage();
+    test.page = p3;
+    let hits = 0, others = 0;
+    await p3.route('https://script.google.com/**', route => {
+      if (route.request().url() === 'https://script.google.com/macros/s/' + ID + '/exec') {
+        hits++;
+        return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true, look: { mascot: 'まる', name: 'まるまる', scenery: 'ノーマル', siteName: 'テスト調査' } }) });
+      }
+      others++;
+      return route.abort();
+    });
+    await p3.goto(`${site}/?s=${ID}`);
+    await p3.waitForFunction(() => document.title === 'テスト調査' && !!document.querySelector('.hero-art .mascot--maru'), null, { timeout: 10000 });
+    assert.ok(hits >= 1 && others === 0, 'hits ' + hits + ' others ' + others);
+    assert.deepStrictEqual(await p3.evaluate(() => [window.KS.api.demo, window.KS.api.id, window.KS.api.suffix]), [false, ID, '@' + ID]);
+    await p3.waitForTimeout(1200);          // 押しまちがい防止の待ち時間（この画面は config.js を書きかえていない）
+    await p3.locator('.hero .btn--primary').click();
+    await p3.waitForSelector('#login-id');
+    assert.strictEqual(new URL(p3.url()).searchParams.get('s'), ID, 'サイトの中を移動したら ?s= が消えた');
+    await ctx.close();
+    test.page = page;
+  });
+  await test('1台の端末で2つの調査を使っても、回答・ログイン・進み具合がまざらない（まだ送っていない回答は、その調査につないだときだけ送られる）', async () => {
+    // もう1つの調査（別の保存先）。参加者ナンバーが同じ（K009）でも、まざらないことを確かめる
+    const ID = 'AKfycbOTHER' + 'y'.repeat(40);
+    const API2 = API + 10;
+    const world2 = createGasWorld(code);
+    world2.call('setup');
+    const server2 = await startServer(world2, API2);
+    world.call('addParticipants', 1);
+    const rowsA = world.sheetRows('参加者');
+    world2.call('addParticipants', rowsA.length - 1);       // 調査Bにも、同じ数だけ作る → 最後のナンバーが同じになる
+    const rowsB = world2.sheetRows('参加者');
+    const a = { id: rowsA[rowsA.length - 1][0], pw: rowsA[rowsA.length - 1][1] };
+    const b = { id: rowsB[rowsB.length - 1][0], pw: rowsB[rowsB.length - 1][1] };
+    assert.strictEqual(a.id, b.id, '同じ参加者ナンバーで試したい');
+    const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, permissions: ['microphone'], locale: 'ja-JP' });
+    const p4 = await prepare(await ctx.newPage());
+    test.page = p4;
+    // ?s= の保存先（Google のアドレス）を、2つめの「まね」サーバーにつなぐ
+    await p4.unroute('https://script.google.com/**');
+    await p4.route('https://script.google.com/**', async route => {
+      if (route.request().url() !== 'https://script.google.com/macros/s/' + ID + '/exec') { errors.push('本物の保存先へ送ろうとした: ' + route.request().url()); return route.abort(); }
+      const res = await route.fetch({ url: `http://localhost:${API2}/exec` });
+      return route.fulfill({ response: res });
+    });
+    try {
+      // 調査A（config.js の保存先）：通信が切れているあいだに1問答える → 端末に残る
+      await login(p4, a);
+      await p4.waitForSelector('.board .tile--here');
+      await practice(p4);
+      await openStep(p4);
+      await p4.waitForSelector('#f-answer');
+      await p4.route(apiPattern, r => r.abort());
+      await p4.fill('#f-answer', 'あたま');
+      await record(p4, 0, 700);
+      await p4.click('text=つぎへ');
+      await p4.waitForSelector('.segs');
+      await p4.waitForFunction(() => window.KS.sync.status().pending + window.KS.sync.status().failed >= 1, null, { timeout: 15000 });
+      const rowsBefore = rowsOf(a.id).length;
+      assert.strictEqual(await p4.evaluate(() => window.KS.state.practiceDone), true);
+      // 調査B（?s= つき）を開く：Aのログインは使われず、Aの回答は送られない
+      const sent2 = () => world2.control.calls.filter(c => c === 'save').length;
+      await p4.goto(`${site}/?s=${ID}#/`);
+      await p4.waitForSelector('.hero__title');
+      await p4.waitForTimeout(800);
+      assert.strictEqual(await p4.locator('#login-id').count(), 0);
+      await p4.locator('.hero .btn--primary').click();
+      await p4.waitForSelector('#login-id');
+      assert.strictEqual(await p4.locator('#login-id').inputValue(), '', 'Aで使ったナンバーが、Bのログイン欄に入っている');
+      await p4.fill('#login-id', b.id); await p4.fill('#login-pw', b.pw);
+      await p4.click('button[type=submit]');
+      await p4.waitForSelector('.board .tile--here', { timeout: 15000 });
+      assert.strictEqual(new URL(p4.url()).searchParams.get('s'), ID);
+      await p4.waitForTimeout(1500);
+      assert.deepStrictEqual(await p4.evaluate(() => { const s = window.KS.sync.status(); return [s.pending, s.failed]; }), [0, 0], 'Aの未送信の回答が、Bのものとして数えられている');
+      assert.strictEqual(sent2(), 0, 'Aの回答がBへ送られた');
+      assert.strictEqual(world2.sheetRows('回答').length, 1);
+      assert.strictEqual(await p4.evaluate(() => window.KS.state.practiceDone), false, 'Aのれんしゅうが、Bでも「終えた」ことになっている');
+      assert.strictEqual(await p4.locator('.notice--warn').count(), 0, 'Bの画面に「まだ送られていない回答」の知らせが出ている');
+      // 調査Aにもどる：ログインし直さずにつづきができ、残っていた回答が送られる
+      await p4.unroute(apiPattern);
+      await p4.goto(`${site}/#/map`);
+      await p4.waitForSelector('.board .tile--here', { timeout: 15000 });
+      assert.strictEqual(new URL(p4.url()).searchParams.get('s'), null);
+      await until(() => rowsOf(a.id).length === rowsBefore + 1, 'Aの回答が届く', 20000);
+      assert.strictEqual(rowsOf(a.id).slice(-1)[0][7], 'あたま');
+      assert.strictEqual(await p4.evaluate(() => window.KS.state.practiceDone), true);
+      assert.strictEqual(sent2(), 0);
+      assert.strictEqual(world2.sheetRows('回答').length, 1);
+      // 調査Bにもどっても、ログインしたままで、Bの進み具合（れんしゅう前）のまま
+      await p4.goto(`${site}/?s=${ID}#/map`);
+      await p4.waitForSelector('.board .tile--here', { timeout: 15000 });
+      await p4.waitForTimeout(800);
+      assert.strictEqual(await p4.locator('#login-id').count(), 0, 'Bでログインし直しになった');
+      assert.strictEqual(await p4.evaluate(() => window.KS.state.practiceDone), false);
+      assert.strictEqual(await p4.locator('.notice--warn').count(), 0);
+    } finally {
+      await ctx.close();
+      server2.close();
+      test.page = page;
+    }
+  });
+
   console.log('そのほか');
   await test('保存先への送信は、決まった形（text/plain のPOST）だけ', async () => {
     assert.ok(world.control.calls.length > 10);
-    assert.ok(world.control.calls.every(c => ['login', 'bootstrap', 'save'].indexOf(c) >= 0), world.control.calls.join(','));
+    assert.ok(world.control.calls.every(c => ['look', 'login', 'bootstrap', 'save'].indexOf(c) >= 0), world.control.calls.join(','));
   });
   await test('数式として入った回答がない・画面のエラーがない', async () => {
     assert.strictEqual(world.ss.sheets.reduce((n, s) => n + s.formulas.length, 0), 0);

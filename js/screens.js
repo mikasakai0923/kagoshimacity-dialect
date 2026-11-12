@@ -10,7 +10,8 @@
    * 共通の部品
    * ============================================================ */
 
-  function siteName() { return String(cfg.siteName || 'かごしま ことばさんぽ'); }
+  function siteName() { return String((KS.look && KS.look.siteName) || cfg.siteName || 'かごしま ことばさんぽ'); }
+  function look() { return KS.look || {}; }
 
   function titleLines(cls) {
     var parts = siteName().split(/[\s　]+/).filter(Boolean);
@@ -22,7 +23,7 @@
   // 案内役のふきだし
   function say(pose, content, small) {
     return h('div', { class: 'say' + (small ? ' say--small' : '') },
-      h('div', { class: 'say__who', svg: KS.art.daikon(pose) }),
+      h('div', { class: 'say__who', svg: KS.art.mascot(pose) }),
       h('div', { class: 'say__bubble' }, content));
   }
 
@@ -156,7 +157,7 @@
       h('section', { class: 'hero' },
         h('div', { class: 'hero__art', svg: KS.art.hero() }),
         titleLines('hero__title'),
-        h('p', { class: 'hero__lead', text: cfg.lead || '' }),
+        h('p', { class: 'hero__lead', text: look().lead || '' }),
         h('button', {
           type: 'button', class: 'btn btn--primary btn--big',
           onclick: function () { KS.app.go(loggedIn ? '#/map' : '#/login'); }
@@ -167,7 +168,7 @@
           '【設定の確認】config.js の apiUrl の形が正しくないため、お試しモードで動いています。「https://script.google.com/macros/s/…/exec」の形で書いてください。') : null
       ),
       h('section', { class: 'info' },
-        h('h2', { text: 'どんな調査？' }), paras(cfg.about)),
+        h('h2', { text: 'どんな調査？' }), paras(look().about)),
       h('section', { class: 'info' },
         h('h2', { text: 'すすめかた' }),
         h('ol', { class: 'howto' },
@@ -183,11 +184,11 @@
           h('li', { text: '登録のときにお伝えした、参加者ナンバーとパスワード' })),
         h('p', { class: 'info__note', text: 'イヤホンやヘッドセットは、はずしてお使いください。LINE などのアプリの中で開くと録音できないことがあります。そのときは、Safari や Chrome で開き直してください。' })),
       h('section', { class: 'info' },
-        h('h2', { text: '回答と声のあつかい' }), paras(cfg.dataPolicy)),
+        h('h2', { text: '回答と声のあつかい' }), paras(look().dataPolicy)),
       h('section', { class: 'info' },
         h('h2', { text: 'お問い合わせ' }),
-        h('p', { text: cfg.organizer ? '実施：' + cfg.organizer : '実施者：（準備中）' }),
-        h('p', { text: cfg.contact ? '連絡先：' + cfg.contact : '連絡先：（準備中）' })),
+        h('p', { text: look().organizer ? '実施：' + look().organizer : '実施者：（準備中）' }),
+        h('p', { text: look().contact ? '連絡先：' + look().contact : '連絡先：（準備中）' })),
       h('footer', { class: 'credits' },
         h('p', { text: 'イラストの一部：Twemoji（CC BY 4.0）／文字：Zen Maru Gothic・Mochiy Pop One（SIL OFL 1.1）' }),
         h('p', { text: 'バージョン ' + KS.VERSION }))
@@ -219,7 +220,7 @@
     var submitBtn = h('button', { type: 'submit', class: 'btn btn--primary btn--big' }, 'ログイン');
     var busy = false;
 
-    var last = KS.store.get('lastId', '');
+    var last = KS.store.get('lastId' + ((KS.api && KS.api.suffix) || ''), '');
     if (last) idInput.value = last;
     if (opt.message) errEl.textContent = opt.message;
 
@@ -285,7 +286,7 @@
       var allDone = steps.length > 0 && doneSteps === steps.length;
       headWrap.innerHTML = '';
       headWrap.appendChild(h('section', { class: 'journey' },
-        h('div', { class: 'journey__art', svg: KS.art.sakurajima(doneSteps, steps.length || 1, false) }),
+        h('div', { class: 'journey__art', svg: KS.art.journey(doneSteps, steps.length || 1, false) }),
         h('p', { class: 'journey__main' },
           allDone ? 'さいごまで歩きました' : [String(steps.length), '歩のうち ', h('strong', { text: String(doneSteps) }), '歩 あるきました']),
         h('p', { class: 'journey__sub', text: allDone ? 'ご協力ありがとうございました。' : 'のこり ' + remain + '問' })
@@ -364,8 +365,9 @@
         } else if (n.kind === 'goal') {
           var all = current === 'goal';
           cls += all ? ' tile--goal tile--done' : ' tile--goal tile--locked';
-          inner = h('img', { class: 'tile__img', src: 'images/icons/volcano.svg', alt: '' });
-          label = [h('span', { class: 'tile__no', text: 'ゴール' }), h('span', { class: 'tile__title', text: all ? 'おつかれさまでした' : '桜島' })];
+          var normal = look().scenery === 'normal';
+          inner = h('img', { class: 'tile__img', src: 'images/icons/' + (normal ? 'tree' : 'volcano') + '.svg', alt: '' });
+          label = [h('span', { class: 'tile__no', text: 'ゴール' }), h('span', { class: 'tile__title', text: all ? 'おつかれさまでした' : (normal ? '大きな木' : '桜島') })];
           aria = 'ゴール。' + (all ? 'さいごまで歩きました' : 'まだ進めません');
           onclick = function () { if (all) app.go('#/done'); else KS.toast('すべての歩を歩きおえると、ゴールです。'); };
         } else {
@@ -398,7 +400,7 @@
           // 案内役は、マスの上に立つ（文字のない側に少し寄せる）
           var mx = p.x - 29 + (side === 'right' ? -20 : 20);
           mx = Math.max(0, Math.min(W - 60, mx));
-          boardWrap.appendChild(h('div', { class: 'board__mascot', 'aria-hidden': 'true', svg: KS.art.daikon(n.kind === 'goal' ? 'cheer' : 'wave'),
+          boardWrap.appendChild(h('div', { class: 'board__mascot', 'aria-hidden': 'true', svg: KS.art.mascot(n.kind === 'goal' ? 'cheer' : 'wave'),
             style: { left: mx + 'px', top: (p.y - T / 2 - 52) + 'px' } }));
         }
       });
@@ -1115,8 +1117,8 @@
     var el = h('main', { class: 'page page--clear' },
       h('div', { class: 'topbar' }, h('span', { class: 'topbar__spacer' }), pill.el),
       h('div', { class: 'clear' },
-        h('div', { class: 'clear__art', svg: KS.art.sakurajima(doneSteps, steps.length || 1, true) }),
-        h('div', { class: 'clear__mascot', svg: KS.art.daikon('cheer') }),
+        h('div', { class: 'clear__art', svg: KS.art.journey(doneSteps, steps.length || 1, true) }),
+        h('div', { class: 'clear__mascot', svg: KS.art.mascot('cheer') }),
         h('h1', { class: 'clear__title' }, allDone ? 'ゴール！' : [h('span', { text: stepNo + '歩目' }), h('span', { text: 'クリア！' })]),
         h('p', { class: 'clear__text', text: allDone
           ? 'さいごまで歩きました。ご協力ありがとうございました。'
