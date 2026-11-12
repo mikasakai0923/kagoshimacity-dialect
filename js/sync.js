@@ -10,7 +10,7 @@
   // state: idle（送るものなし） | sending（送信中） | retrying（失敗のあとの送り直し中） | waiting（次の送り直しまで待機） | blocked（ログインし直しが必要）
   var status = { pending: 0, failed: 0, volatile: 0, state: 'idle', message: '' };
   var WAITS = [3000, 8000, 20000, 60000, 120000];
-  var LOCAL_KEYS = { audio: 1, failed: 1, error: 1, createdAt: 1, tries: 1, sid: 1 };
+  var LOCAL_KEYS = { audio: 1, failed: 1, error: 1, createdAt: 1, tries: 1, sid: 1, api: 1 };   // 端末の中だけで使う欄（保存先へは送らない）
   var delivered = {};       // この画面を開いてから保存先に届いた送信ID
   var deliveredList = [];
   function markDelivered(sid) {
@@ -54,10 +54,15 @@
     })).then(function (list) { out.audio = list; return out; });
   }
 
+  // この端末の、この参加者の、いまつながっている保存先あての回答だけ。
+  // （?s= で別の調査につないだときに、別の調査の回答を送ってしまわないように。印のない古い回答は、config.js の保存先あて）
   function mine(items) {
     var session = KS.state && KS.state.session;
     if (!session) return [];
-    return items.filter(function (i) { return i.participant === session.id; });
+    var api = KS.api || {};
+    return items.filter(function (i) {
+      return i.participant === session.id && (i.api == null ? api.defaultId : i.api) === api.id;
+    });
   }
 
   function refreshCounts() {
@@ -156,6 +161,7 @@
     // 回答をとっておき、送信をはじめる。端末に保存できたかどうかを返す（{persisted: true|false}）
     enqueue: function (item) {
       item.createdAt = Date.now();
+      item.api = (KS.api && KS.api.id) || '';      // どの保存先あてか
       var saved;
       return KS.db.put(item).then(function (res) {
         saved = res;

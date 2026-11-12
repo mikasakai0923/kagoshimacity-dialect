@@ -79,14 +79,14 @@ test('持ち主が ?admin=1 で開くと、管理画面が出る', () => {
   const m = /var KS_BOOT = (\{[^\n]*?\});<\/script>/.exec(page);
   assert.ok(m, 'はじめの情報が見つからない');
   const boot = JSON.parse(m[1]);
-  assert.strictEqual(boot.mode, 'web'); assert.strictEqual(boot.version, '0.5.0'); assert.strictEqual(boot.hours, 12);
+  assert.strictEqual(boot.mode, 'web'); assert.strictEqual(boot.version, '0.6.0'); assert.strictEqual(boot.hours, 12);
   assert.strictEqual(admin('overview', {}, boot.token).ok, true);
   assert.ok(openAsWeb('OWNER@Example.com')._html, 'メールアドレスの大文字・小文字のちがいで開けない');
   assert.ok(openAsWeb(w.OWNER, { admin: '' })._html, '?admin だけでも開ける');
 });
 test('?admin を付けないときは、これまでどおり動作確認の返事をする', () => {
   const r = JSON.parse(openAsWeb('', {}).getContent());
-  assert.strictEqual(r.ok, true); assert.strictEqual(r.ready, true); assert.strictEqual(r.version, '0.5.0');
+  assert.strictEqual(r.ok, true); assert.strictEqual(r.ready, true); assert.strictEqual(r.version, '0.6.0');
   assert.ok(!/adm1\./.test(JSON.stringify(r)));
 });
 test('メニューから開くと、大きな窓で管理画面が出る', () => {
@@ -210,7 +210,8 @@ test('直近の回答は新しい順に8件。日時は数字（ミリ秒）で�
 });
 test('設定・リンクを渡す。パスワードは「全体のようす」には入れない', () => {
   assert.deepStrictEqual(ov.settings, { open: true, notice: '', instruction: setting('教示文'), wordQuestion: '「{語}」のことをなんといいますか？', sentenceQuestion: '「{文}」をなんといいますか？',
-    maxRecordSec: 20, noiseWarnDb: 20, idPrefix: 'K', siteUrl: '' });
+    maxRecordSec: 20, noiseWarnDb: 20, idPrefix: 'K', siteUrl: '',
+    mascot: '桜島大根', mascotName: '', scenery: '鹿児島', siteName: '', lead: '', about: '', dataPolicy: '', organizer: '', contact: '' });
   assert.ok(/^https:\/\/docs\.google\.com\/spreadsheets\/d\//.test(ov.links.spreadsheet));
   for (const n of ['設定', '参加者', '歩', '項目', '回答']) assert.ok(new RegExp('#gid=' + sheet(n).getSheetId() + '$').test(ov.links.sheets[n]), n);
   assert.ok(/^https:\/\/drive\.google\.com\/drive\/folders\//.test(ov.links.audioFolder));
@@ -672,7 +673,8 @@ test('文章・数字・頭文字・サイトのURLを保存できる。参加�
   const r = admin('saveSettings', { values });
   assert.strictEqual(r.ok, true, JSON.stringify(r));
   assert.deepStrictEqual(r.settings, { open: true, notice: '10/20 は、お休みします。', instruction: 'ふだんのことばで教えてください。', wordQuestion: '「{語}」は、なんといいますか？',
-    sentenceQuestion: '「{文}」は、なんといいますか？', maxRecordSec: 30, noiseWarnDb: 15, idPrefix: 'KA', siteUrl: 'https://example.github.io/site/' });
+    sentenceQuestion: '「{文}」は、なんといいますか？', maxRecordSec: 30, noiseWarnDb: 15, idPrefix: 'KA', siteUrl: 'https://example.github.io/site/',
+    mascot: '桜島大根', mascotName: '', scenery: '鹿児島', siteName: '', lead: '', about: '', dataPolicy: '', organizer: '', contact: '' });
   assert.strictEqual(setting('お知らせ'), '10/20 は、お休みします。');
   assert.strictEqual(setting('録音の上限（秒）'), 30); assert.strictEqual(setting('雑音の注意の目安（dB）'), 15);
   const login = w.post({ action: 'login', id: people[0].id, password: people[0].pw });
@@ -682,6 +684,37 @@ test('文章・数字・頭文字・サイトのURLを保存できる。参加�
   assert.strictEqual(admin('overview').noiseTh, 15);
   assert.ok(/録音フォルダ/.test(w.sheetRows('設定').map(x => x[0]).join()), '録音フォルダの行が消えた');
   assert.ok(/^https:/.test(setting('録音フォルダ')));
+});
+test('見た目：案内役・景色・名前・紹介の文章を保存できる。参加者には、ログインの前（look）にも、ログインのあと（bootstrap）にも届く', () => {
+  let r = admin('saveSettings', { values: { '案内役': 'ねこ' } });
+  assert.strictEqual(r.error, 'invalid', '知らない案内役はことわる');
+  r = admin('saveSettings', { values: { '景色': '宇宙' } });
+  assert.strictEqual(r.error, 'invalid', '知らない景色はことわる');
+  r = admin('saveSettings', { values: { '案内役の名前': 'あ'.repeat(21) } });
+  assert.strictEqual(r.error, 'invalid', '長すぎる名前はことわる');
+  r = admin('saveSettings', { values: { '案内役': 'はっぱ', '案内役の名前': ' はっぱ太郎\n ', '景色': 'ノーマル', 'サイトの名前': 'ことば さんぽ', '紹介のことば': 'ふだんのことばを教えてください。',
+    '紹介文': '一つめ。\n\n二つめ。', '回答と声のあつかい': 'ナンバーだけで保存します。', '実施者': '○○大学', '問い合わせ先': 'test@example.com' } });
+  assert.strictEqual(r.ok, true, JSON.stringify(r));
+  assert.strictEqual(r.settings.mascot, 'はっぱ'); assert.strictEqual(r.settings.mascotName, 'はっぱ太郎'); assert.strictEqual(r.settings.scenery, 'ノーマル');
+  assert.strictEqual(r.settings.siteName, 'ことば さんぽ'); assert.strictEqual(r.settings.about, '一つめ。\n\n二つめ。');
+  assert.strictEqual(setting('案内役'), 'はっぱ'); assert.strictEqual(setting('景色'), 'ノーマル');
+  // ログインの前でも見た目は読める（合言葉はいらない）。ほかのことは、やはり読めない
+  const look = w.post({ action: 'look' });
+  assert.strictEqual(look.ok, true, JSON.stringify(look));
+  assert.deepStrictEqual(look.look, { mascot: 'はっぱ', name: 'はっぱ太郎', scenery: 'ノーマル', siteName: 'ことば さんぽ', lead: 'ふだんのことばを教えてください。',
+    about: '一つめ。\n\n二つめ。', dataPolicy: 'ナンバーだけで保存します。', organizer: '○○大学', contact: 'test@example.com' });
+  assert.strictEqual(Object.keys(look).sort().join(','), 'look,ok,version', '見た目のほかに、よけいなものを返している');
+  assert.strictEqual(w.post({ action: 'bootstrap' }).ok, false);
+  const login = w.post({ action: 'login', id: people[0].id, password: people[0].pw });
+  const boot = w.post({ action: 'bootstrap', token: login.token });
+  assert.deepStrictEqual(boot.look, look.look);
+  // 「設定」シートに手で変な値を書いても、参加者には決まった値で届く
+  const set = w.ss.getSheetByName('設定');
+  const rowOf = key => set.rows.findIndex(x => x[0] === key) + 1;
+  set.getRange(rowOf('案内役'), 2).setValue('どんぐり'); set.getRange(rowOf('景色'), 2).setValue('');
+  const look2 = w.post({ action: 'look' }).look;
+  assert.strictEqual(look2.mascot, '桜島大根'); assert.strictEqual(look2.scenery, '鹿児島');
+  admin('saveSettings', { values: { '案内役': '桜島大根', '案内役の名前': '', '景色': '鹿児島', 'サイトの名前': '', '紹介のことば': '', '紹介文': '', '回答と声のあつかい': '', '実施者': '', '問い合わせ先': '' } });
 });
 test('数字や日付に見える文字を入れても、文字のまま残る', () => {
   for (const text of ['0123', '10/20', '2026-10-20', '1e5', "'かっこ", '=SUM(1,2)', '+81']) {

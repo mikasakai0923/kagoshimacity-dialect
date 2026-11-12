@@ -150,7 +150,7 @@ async function test(name, fn) {
     assert.ok(new RegExp('^集まった回答 ' + o.totals.rows + ' ?件 今日は ' + o.totals.today + '件').test(tiles[2]), tiles[2]);
     assert.ok(new RegExp('^ゴールした人 ' + o.totals.finished + ' ?人 全 ' + items.length + '問').test(tiles[3]), tiles[3]);
     assert.strictEqual(await title(page), 'ダッシュボード');
-    assert.ok(/バージョン 0\.5\.0/.test(await page.locator('.side__ver').innerText()));
+    assert.ok(/バージョン 0\.6\.0/.test(await page.locator('.side__ver').innerText()));
     await shot(page, 'home');
   });
   await test('グラフ：14日・30日・週ごとを切りかえられる。表でも見られる', async () => {
@@ -1091,6 +1091,46 @@ async function test(name, fn) {
     await toast(page, /変更はありません/);
     assert.strictEqual(runs().slice(m).filter(r => r[1] === 'saveSettings').length, 0);
     assert.strictEqual(await page.locator('#settings-save').isDisabled(), true);
+  });
+  await test('見た目：案内役と景色を札でえらび、名前と紹介の文章を書いて保存できる。左上の印もえらんだ案内役になる', async () => {
+    if (!(await page.locator('.nav [data-view="settings"][aria-current="page"]').count())) await go(page, 'settings');
+    assert.strictEqual(await page.locator('[data-pick="mascot:桜島大根"]').getAttribute('aria-checked'), 'true');
+    assert.strictEqual(await page.locator('.lookpicks .lookpick').count(), 7, '案内役5つと景色2つの札');
+    // 札の中身（絵と名前）が札の外へはみ出さず、下の入力欄と重ならないこと
+    const stack = await page.evaluate(() => {
+      const pick = document.querySelector('[data-pick="mascot:桜島大根"]');
+      const art = pick.querySelector('.lookpick__art svg').getBoundingClientRect();
+      const name = pick.querySelector('.lookpick__name').getBoundingClientRect();
+      const box = pick.getBoundingClientRect();
+      const field = document.querySelector('#set-mascotName').getBoundingClientRect();
+      const row = pick.parentNode.getBoundingClientRect();
+      return { box: [box.width, box.height], artIn: art.top >= box.top && art.bottom <= box.bottom, nameIn: name.top >= box.top && name.bottom <= box.bottom, fieldBelow: field.top >= row.bottom };
+    });
+    assert.ok(stack.box[0] >= 100 && stack.box[1] >= 100, '札が小さすぎる: ' + stack.box.join('x'));
+    assert.ok(stack.artIn && stack.nameIn, '絵や名前が札の外へはみ出している');
+    assert.ok(stack.fieldBelow, '「案内役の名前」の欄が札と重なっている');
+    assert.ok((await page.locator('#brand-mark svg').getAttribute('class')).indexOf('mascot--daikon') >= 0);
+    await page.locator('[data-pick="mascot:まる"]').click();
+    assert.strictEqual(await page.locator('[data-pick="mascot:まる"]').getAttribute('aria-checked'), 'true');
+    assert.strictEqual(await page.locator('#set-mascotName').getAttribute('placeholder'), 'まるちゃん');
+    assert.ok((await page.locator('.lookpreview__art svg').getAttribute('class')).indexOf('mascot--maru') >= 0, '見本の絵が変わらない');
+    await page.locator('[data-pick="scenery:ノーマル"]').click();
+    await page.locator('#set-mascotName').fill('まるお');
+    await page.locator('#set-siteName').fill('ことば さんぽ');
+    await page.locator('#set-about').fill('一つめの段落。\n\n二つめの段落。');
+    await page.locator('#settings-save').click();
+    await toast(page, /設定を保存しました/);
+    assert.strictEqual(setting('案内役'), 'まる'); assert.strictEqual(setting('景色'), 'ノーマル'); assert.strictEqual(setting('案内役の名前'), 'まるお');
+    assert.strictEqual(setting('サイトの名前'), 'ことば さんぽ'); assert.strictEqual(setting('紹介文'), '一つめの段落。\n\n二つめの段落。');
+    await page.waitForFunction(() => (document.querySelector('#brand-mark svg') || {}).getAttribute && document.querySelector('#brand-mark svg').getAttribute('class').indexOf('mascot--maru') >= 0, null, { timeout: 10000 });
+    assert.strictEqual(await page.locator('[data-pick="mascot:まる"]').getAttribute('aria-checked'), 'true');
+    await shot(page, 'settings-look');
+    await page.locator('[data-pick="mascot:桜島大根"]').click();
+    await page.locator('[data-pick="scenery:鹿児島"]').click();
+    await page.locator('#set-mascotName').fill(''); await page.locator('#set-siteName').fill(''); await page.locator('#set-about').fill('');
+    await page.locator('#settings-save').click();
+    await toast(page, /設定を保存しました/);
+    assert.strictEqual(setting('案内役'), '桜島大根');
   });
   await test('保存していない変更があるときは、ほかの画面へ移る前に確かめる', async () => {
     await page.locator('#set-notice').fill('書きかけ');

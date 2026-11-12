@@ -5,6 +5,8 @@
   var h = KS.h;
   var cfg = window.KS_CONFIG || {};
   var store = KS.store;
+  // 端末にとっておくものの名前。?s= で別の保存先につないでいるときは、保存先ごとに分ける（調査がまざらないように）
+  var SFX = (KS.api && KS.api.suffix) || '';
 
   var state = KS.state = {
     session: null,        // { id, token, expiresAt }
@@ -20,8 +22,58 @@
   var refreshing = null, refreshingFor = '';
   var root = document.getElementById('app');
 
-  function siteName() { return String(cfg.siteName || 'かごしま ことばさんぽ'); }
+  function siteName() { return String((KS.look && KS.look.siteName) || cfg.siteName || 'かごしま ことばさんぽ'); }
   function has(obj, key) { return Object.prototype.hasOwnProperty.call(obj, key); }
+
+  /* ---------- 見た目（案内役・景色・紹介の文章） ----------
+   * もとの値は config.js。保存先の「設定」シートに書いてあれば、そちらが勝つ（サイトを1つにして、調査ごとに保存先を分けられるように）。
+   * 保存先から届いた見た目は端末にとっておき、次に開いたときは、すぐにその見た目で始める。 */
+  var LOOK_KEYS = ['siteName', 'lead', 'about', 'dataPolicy', 'organizer', 'contact'];
+  function lookDefaults() {
+    var d = { mascot: 'daikon', name: '', scenery: 'kagoshima' };
+    LOOK_KEYS.forEach(function (k) { d[k] = cfg[k] == null ? '' : cfg[k]; });
+    return d;
+  }
+  function paragraphs(v) {
+    if (Array.isArray(v)) return v.map(function (t) { return String(t == null ? '' : t); }).filter(Boolean);
+    return String(v == null ? '' : v).split(/\n\s*\n/).map(function (t) { return t.replace(/\s*\n\s*/g, '').trim(); }).filter(Boolean);
+  }
+  function lookKey() { return JSON.stringify([KS.look.mascot, KS.look.name, KS.look.scenery, KS.look.siteName, KS.look.lead, KS.look.about, KS.look.dataPolicy, KS.look.organizer, KS.look.contact]); }
+  // 保存先の値（「設定」シートの書き方）を、画面で使う形にして重ねる
+  KS.applyLook = function (got) {
+    var look = lookDefaults();
+    var m = window.KS_MASCOTS;
+    if (got && typeof got === 'object') {
+      if (got.mascot) look.mascot = m.byLabel(got.mascot);
+      if (got.scenery) look.scenery = /ノーマル|normal/.test(String(got.scenery)) ? 'normal' : 'kagoshima';
+      if (got.name != null && String(got.name).trim()) look.name = String(got.name).trim().slice(0, 20);
+      LOOK_KEYS.forEach(function (k) {
+        var v = got[k];
+        if (v == null) return;
+        if (k === 'about' || k === 'dataPolicy') { var ps = paragraphs(v); if (ps.length) look[k] = ps; }
+        else if (String(v).trim()) look[k] = String(v).trim();
+      });
+    }
+    if (!look.name) look.name = m.info[look.mascot].name;
+    look.about = paragraphs(look.about); look.dataPolicy = paragraphs(look.dataPolicy);
+    var before = KS.look ? lookKey() : '';
+    KS.look = look;
+    document.title = siteName();
+    var boot = document.querySelector('.boot__title');
+    if (boot) boot.textContent = siteName();
+    return before !== lookKey();
+  };
+  KS.applyLook(store.get('look:' + (KS.api.id || ''), null));
+  // 保存先に、いまの見た目をたずねる（届いたら、画面を出し直す）
+  function fetchLook() {
+    if (!KS.api.look) return;
+    KS.api.look().then(function (res) {
+      var got = res && res.look;
+      if (!got) return;
+      store.set('look:' + (KS.api.id || ''), got);
+      if (KS.applyLook(got) && current) render();
+    }, function () { /* 届かなくても、config.js の見た目で動く */ });
+  }
   function isAuthCode(err) {
     var code = err && err.code;
     return code === 'auth' || code === 'disabled' || code === 'closed';
@@ -65,7 +117,7 @@
 
   app.setPracticeDone = function () {
     state.practiceDone = true;
-    if (state.session) store.set('practice:' + state.session.id, true);
+    if (state.session) store.set('practice:' + state.session.id + SFX, true);
   };
 
   /* ---------- 回答を出す ----------
@@ -83,7 +135,7 @@
       var rec = { status: out.status, at: Date.now() };
       state.progress[item.id] = rec;
       localMarks[item.id] = rec;
-      store.set('progress:' + s.id, state.progress);
+      store.set('progress:' + s.id + SFX, state.progress);
       KS.bus.emit('survey');          // 地図が出ていれば、描き直す
     }
     var sub = {
@@ -128,9 +180,9 @@
   /* ---------- ログイン・ログアウト ---------- */
   function adoptSession(session) {
     state.session = session;
-    state.survey = store.get('survey:' + session.id, null);
-    state.progress = store.get('progress:' + session.id, {}) || {};
-    state.practiceDone = !!store.get('practice:' + session.id, false);
+    state.survey = store.get('survey:' + session.id + SFX, null);
+    state.progress = store.get('progress:' + session.id + SFX, {}) || {};
+    state.practiceDone = !!store.get('practice:' + session.id + SFX, false);
     state.volatileMode = false;
     localMarks = {};
     lastRefresh = 0;
@@ -139,14 +191,14 @@
   app.login = function (id, password) {
     return KS.api.login(id, password).then(function (res) {
       var session = { id: res.participant.id, token: res.token, expiresAt: res.expiresAt };
-      store.set('session', session);
-      store.set('lastId', session.id);
+      store.set('session' + SFX, session);
+      store.set('lastId' + SFX, session.id);
       adoptSession(session);
       return app.refresh().then(null, function (err) {
         // 調査の内容を読みこめなくても、前に読みこんだものがあれば、それで始める（あとで読みこみ直す）
         if (state.survey && !isAuthCode(err)) return;
         state.session = null;
-        store.remove('session');
+        store.remove('session' + SFX);
         throw err;
       });
     }).then(function () {
@@ -156,7 +208,7 @@
 
   app.logout = function () {
     KS.rec.stopAll();
-    store.remove('session');
+    store.remove('session' + SFX);
     state.session = null; state.survey = null; state.progress = {}; state.practiceDone = false; state.volatileMode = false;
     localMarks = {};
     KS.sync.reset();
@@ -195,9 +247,10 @@
         pendingIds.forEach(function (id) { if (!has(progress, id)) progress[id] = { status: '回答済', at: Date.now() }; });
         for (var m in localMarks) if (has(localMarks, m) && !has(progress, m)) progress[m] = localMarks[m];
         state.survey = { settings: data.settings || {}, steps: data.steps || [], items: data.items || [] };
+        if (data.look) { store.set('look:' + (KS.api.id || ''), data.look); if (KS.applyLook(data.look) && current) render(); }
         state.progress = progress;
-        store.set('survey:' + s.id, state.survey);
-        store.set('progress:' + s.id, progress);
+        store.set('survey:' + s.id + SFX, state.survey);
+        store.set('progress:' + s.id + SFX, progress);
         lastRefresh = Date.now();
         KS.bus.emit('survey');
       });
@@ -264,7 +317,7 @@
 
   function loadingScreen(text) {
     return { el: h('main', { class: 'page page--center' },
-      h('div', { class: 'loading' }, h('div', { class: 'loading__mascot', svg: KS.art.daikon('wave') }), h('p', { text: text || '読みこんでいます…' }))), title: siteName() };
+      h('div', { class: 'loading' }, h('div', { class: 'loading__mascot', svg: KS.art.mascot('wave') }), h('p', { text: text || '読みこんでいます…' }))), title: siteName() };
   }
   function errorScreen(message) {
     return { el: h('main', { class: 'page page--center' },
@@ -338,7 +391,7 @@
   function handleAuthError(err) {
     if (!isAuthCode(err)) return false;
     var msg = (err && err.message) || 'もう一度ログインしてください。';
-    store.remove('session');
+    store.remove('session' + SFX);
     state.session = null;
     KS.sync.reset();
     app._loginMessage = msg;
@@ -406,12 +459,13 @@
   /* ---------- はじまり ---------- */
   function start() {
     try { if ('scrollRestoration' in window.history) window.history.scrollRestoration = 'manual'; } catch (e) { /* 何もしない */ }
-    var session = store.get('session', null);
+    var session = store.get('session' + SFX, null);
     if (session && session.token && session.expiresAt > Date.now() + 60000) adoptSession(session);
-    else if (session) store.remove('session');
+    else if (session) store.remove('session' + SFX);
 
     if (state.session) KS.sync.kick();
     render();
+    fetchLook();
   }
 
   try { start(); }

@@ -14,22 +14,28 @@
   var rawUrl = String(cfg.apiUrl || '').trim();
   var apiUrl = '';
   var badUrl = false;
+  // 同じサイトを、別の調査（別の保存先）でも使えるように：アドレスに ?s=（ウェブアプリのデプロイID）がついていれば、その保存先につなぐ。
+  // サイトの中の移動（#/…）では ?s= は残るので、参加者には ?s= つきのアドレス（参加者カードのQRコードなど）を案内する
+  var picked = /[?&]s=([A-Za-z0-9_-]{20,})(?=&|$)/.exec(String(window.location.search || ''));
   // 保存先として受けつけるのは Apps Script のウェブアプリだけ（書きまちがいで、回答を別の場所へ送らないため）。
-  if (rawUrl) {
-    var m = /^https:\/\/script\.google\.com\/(?:macros\/s|a\/macros\/[A-Za-z0-9.\-]+\/s|a\/[A-Za-z0-9.\-]+\/macros\/s)\/([A-Za-z0-9_\-]+)\/exec$/.exec(rawUrl);
-    if (m) {
-      // 組織の Google アカウントで作ると、URL に「/a/macros/組織名/」が入ることがある。
-      // その形のままでは Google へのログインを求められるので、ログインなしで使える形にそろえる。
-      apiUrl = 'https://script.google.com/macros/s/' + m[1] + '/exec';
-    } else if (/^http:\/\/(localhost|127\.0\.0\.1):\d+\//.test(rawUrl)) {
-      apiUrl = rawUrl;                         // 開発・テスト用
-    } else {
-      badUrl = true;
-      if (window.console) console.warn('config.js の apiUrl が Apps Script のURL（https://script.google.com/macros/s/…/exec）ではないため、お試しモードで動かします。');
-    }
+  function acceptUrl(raw) {
+    var m = /^https:\/\/script\.google\.com\/(?:macros\/s|a\/macros\/[A-Za-z0-9.\-]+\/s|a\/[A-Za-z0-9.\-]+\/macros\/s)\/([A-Za-z0-9_\-]+)\/exec$/.exec(raw);
+    // 組織の Google アカウントで作ると、URL に「/a/macros/組織名/」が入ることがある。
+    // その形のままでは Google へのログインを求められるので、ログインなしで使える形にそろえる。
+    if (m) return 'https://script.google.com/macros/s/' + m[1] + '/exec';
+    if (/^http:\/\/(localhost|127\.0\.0\.1):\d+\//.test(raw)) return raw;     // 開発・テスト用
+    return '';
   }
+  var defaultUrl = rawUrl ? acceptUrl(rawUrl) : '';
+  if (rawUrl && !defaultUrl) {
+    badUrl = true;
+    if (window.console) console.warn('config.js の apiUrl が Apps Script のURL（https://script.google.com/macros/s/…/exec）ではないため、お試しモードで動かします。');
+  }
+  apiUrl = picked ? 'https://script.google.com/macros/s/' + picked[1] + '/exec' : defaultUrl;
   var forceDemo = /[?&]demo(=1|&|$)/.test(window.location.search);
   var demo = !apiUrl || forceDemo;
+  // 保存先ごとの印（端末にとっておくものの名前や、送る前の回答の札に使う）
+  function idOf(url) { return url.replace(/^https:\/\/script\.google\.com\/macros\/s\//, '').replace(/\/exec$/, ''); }
 
   var NET_MSG = '通信できませんでした。電波のよい場所で、もう一度お試しください。';
 
@@ -68,6 +74,8 @@
   }
 
   var live = {
+    // 見た目（案内役・景色・紹介の文章）。ログインの前にも使うので、合言葉はいらない
+    look: function () { return post({ action: 'look' }, 15000); },
     login: function (id, password) { return post({ action: 'login', id: id, password: password }, 30000); },
     bootstrap: function (token) { return post({ action: 'bootstrap', token: token }, 45000); },
     // 録音つきの回答は大きいので、通信のおそい場所でも送りきれるように長めに待つ
@@ -81,6 +89,7 @@
     });
   }
   var demoApi = {
+    look: function () { return later(function () { return { ok: true, look: KS.DEMO.look || {} }; }, 50); },
     login: function (id, password) {
       return later(function () {
         if (!KS.norm(id) || !KS.norm(password)) throw new KS.ApiError('bad_credentials', '参加者ナンバーとパスワードを入れてください。');
@@ -121,6 +130,10 @@
 
   KS.api = demo ? demoApi : live;
   KS.api.demo = demo;
+  KS.api.id = demo ? 'demo' : idOf(apiUrl);                        // いまつながっている保存先の印
+  KS.api.defaultId = demo ? 'demo' : idOf(defaultUrl);             // config.js に書いてある保存先の印（?s= がないときの保存先）
+  // 端末にとっておくもの（ログイン・進み具合など）の名前につける印。config.js の保存先のときは、前の版と同じ名前のままにする
+  KS.api.suffix = KS.api.id === KS.api.defaultId ? '' : '@' + KS.api.id;
   KS.api.badUrl = badUrl;        // config.js の apiUrl が書いてあるのに、形が正しくない
 
   // お試しモードの回答を、本番の「回答」シートと同じ列のCSVにする
