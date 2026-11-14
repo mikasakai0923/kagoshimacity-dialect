@@ -2,7 +2,7 @@
 (function () {
   'use strict';
   var KS = window.KS = window.KS || {};
-  KS.VERSION = '0.4.0';
+  KS.VERSION = '0.5.0';
 
   // 日時を、日本時間の「2026-10-12T08:41:03+09:00」の形にする（端末の時計がどの国の設定でも、日本時間で書く）
   KS.jstStamp = function (date) {

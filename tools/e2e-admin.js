@@ -150,7 +150,7 @@ async function test(name, fn) {
     assert.ok(new RegExp('^集まった回答 ' + o.totals.rows + ' ?件 今日は ' + o.totals.today + '件').test(tiles[2]), tiles[2]);
     assert.ok(new RegExp('^ゴールした人 ' + o.totals.finished + ' ?人 全 ' + items.length + '問').test(tiles[3]), tiles[3]);
     assert.strictEqual(await title(page), 'ダッシュボード');
-    assert.ok(/バージョン 0\.6\.0/.test(await page.locator('.side__ver').innerText()));
+    assert.ok(/バージョン 0\.7\.0/.test(await page.locator('.side__ver').innerText()));
     await shot(page, 'home');
   });
   await test('グラフ：14日・30日・週ごとを切りかえられる。表でも見られる', async () => {
@@ -1851,7 +1851,7 @@ async function test(name, fn) {
       assert.strictEqual(await page.locator('#it-segments').inputValue(), '雨が｜降っている');
       assert.strictEqual(await page.locator('#it-type').inputValue(), '例文');
       const nAns = world.sheetRows('回答').slice(1).filter(r => r[col('設問ID')] === 'S004').length;
-      assert.ok(new RegExp('回答が ' + nAns + ' 件あります').test(await page.locator('.dialog .notice').innerText()), await page.locator('.dialog .notice').innerText());
+      assert.ok(new RegExp('回答が ' + nAns + ' 件あります').test(await page.locator('.dialog .notice--warn').innerText()), await page.locator('.dialog .notice--warn').innerText());
       assert.strictEqual(await page.locator('#it-id').getAttribute('readonly'), '', '回答があるので設問IDは変えられないはず');
       await page.locator('#it-prompt').fill('雨が降っている？');
       await page.locator('#it-context').fill('外を見て、たずねる。');
@@ -1944,6 +1944,36 @@ async function test(name, fn) {
       assert.deepStrictEqual([r[0], r[1], r[3], r[4], r[7], r[9]], [2, 3, '例文', '犬が走る。', '犬が｜走る', true]);
       assert.ok(world.call('ksReadItems_').some(i => i.id === 'S006'));
     });
+    await test('項目の編集：種別「場面」の設問を足す：文節の欄は消え、場面が要ることが分かる。一覧に「場面」と出る', async () => {
+      await page.locator('#item-add').click();
+      await page.waitForSelector('.dialog');
+      assert.strictEqual(await page.locator('#it-scene-note').isVisible(), false);
+      await page.locator('#it-type').selectOption('場面');
+      assert.strictEqual(await page.locator('#it-scene-note').isVisible(), true, '場面の説明が出るはず');
+      assert.strictEqual(await page.locator('#it-segments').isVisible(), false, '文節の欄は消えるはず');
+      assert.strictEqual(await page.locator('#it-example').isVisible(), false, '提案例文の欄は消えるはず');
+      assert.ok(/参加者には見せません/.test(await page.locator('#it-prompt-hint').innerText()));
+      await page.locator('#it-id').fill('S007');
+      await page.locator('#it-prompt').fill('物を落としたときの声');
+      await page.locator('#it-step').fill('2');
+      await page.locator('.dialog .btn--primary').click();
+      assert.ok(/参加者に見せる場面を書いてください/.test(await page.locator('.dialog__error').innerText()));
+      await page.locator('#it-context').fill('うっかり物を落としてしまったとき、思わず出る声');
+      await page.locator('.dialog .btn--primary').click();
+      await dialogGone(page);
+      await toast(page, /設問「物を落としたときの声」を足しました/);
+      const rows = await page.locator('.table--items tbody tr').allInnerTexts();
+      assert.ok(/S007[\s\S]*場面/.test(rows[rows.length - 1]), rows[rows.length - 1]);
+      const r = itemRowOf('S007');
+      assert.deepStrictEqual([r[0], r[1], r[3], r[4], r[5], r[7]], [2, 4, '場面', '物を落としたときの声', 'うっかり物を落としてしまったとき、思わず出る声', '']);
+      // 直す窓でも「場面」のまま開く
+      await page.locator('.table--items tbody tr').last().locator('.rowactions .textbtn', { hasText: '直す' }).click();
+      await page.waitForSelector('.dialog');
+      assert.strictEqual(await page.locator('#it-type').inputValue(), '場面');
+      assert.strictEqual(await page.locator('#it-scene-note').isVisible(), true);
+      await page.keyboard.press('Escape');
+      await dialogGone(page);
+    });
     await test('項目の編集：表から取りこむ（貼りつけ）：直すところがあれば取りこめない。直してから下見すると、ちがいが出て、取りこめる', async () => {
       await go(page, 'items');
       await page.locator('#item-import').click();
@@ -1996,12 +2026,12 @@ async function test(name, fn) {
       await page.waitForSelector('#plan');
       const text = (await page.locator('#plan').innerText()).replace(/\s+/g, ' ');
       assert.ok(/新しく足す 3 件/.test(text) && /直す 1 件/.test(text), text.slice(0, 400));
-      assert.ok(/消す 7 件/.test(text), text.slice(0, 400));
+      assert.ok(/消す 8 件/.test(text), text.slice(0, 400));
       assert.ok(/回答のある 4 件は消さずに/.test(text), text);
       assert.ok(/1歩目「木の歩」/.test(text));
       await page.locator('#import-apply').click();
       await page.waitForSelector('.dialog');
-      assert.ok(/7 件の設問が一覧から消えます/.test(await page.locator('.dialog').innerText()));
+      assert.ok(/8 件の設問が一覧から消えます/.test(await page.locator('.dialog').innerText()));
       await page.locator('.dialog .btn', { hasText: 'やめる' }).click();
       await dialogGone(page);
       assert.ok(!itemRowOf('X001'), 'やめたのに書きこまれた');

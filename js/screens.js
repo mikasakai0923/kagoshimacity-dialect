@@ -667,9 +667,14 @@
     }
 
     function questionLine(item) {
+      var el2 = h('h1', { class: 'q__title' });
+      if (item.type === '場面') {
+        // 場面の設問：標準語の文は見せない。質問の文だけ（場面は questionLine の外で大きく出す）
+        el2.appendChild(h('span', { class: 'q__rest', text: set.sceneQuestion || 'こんなとき、なんといいますか？' }));
+        return el2;
+      }
       var tpl = item.type === '語彙' ? (set.wordQuestion || '「{語}」のことをなんといいますか？') : (set.sentenceQuestion || '「{文}」をなんといいますか？');
       var m = /\{(語|文)\}/.exec(tpl);
-      var el2 = h('h1', { class: 'q__title' });
       if (!m) {
         el2.appendChild(h('span', { class: 'q__prompt-wrap' }, h('span', { class: 'q__prompt' }, KS.ruby(item.prompt))));
         el2.appendChild(h('span', { class: 'q__rest', text: tpl }));
@@ -824,10 +829,16 @@
       shownAt = Date.now();
 
       body.innerHTML = '';
-      var isWord = item.type === '語彙';
+      var isScene = item.type === '場面';
+      var isWord = item.type === '語彙' || isScene;
       var pic = scene(item.art);
-      var ctx = item.context ? h('p', { class: 'q__context' },
-        /^読み/.test(item.context) ? null : h('span', { class: 'tag', text: '場面' }), KS.ruby(item.context)) : null;
+      var ctx = null;
+      if (isScene) {
+        // 場面の設問：場面を大きく見せる（提示語・例文は参加者には見せない）
+        ctx = h('p', { class: 'q__scene' }, h('span', { class: 'tag', text: '場面' }), h('span', { class: 'q__scene-text' }, KS.ruby(item.context || '')));
+      } else if (item.context) {
+        ctx = h('p', { class: 'q__context' }, /^読み/.test(item.context) ? null : h('span', { class: 'tag', text: '場面' }), KS.ruby(item.context));
+      }
 
       var formWrap = h('div', { class: 'q__form' });
       var statusWrap = h('div', { class: 'q__status' });
@@ -848,11 +859,11 @@
         }
         var recLabel = '録音（ボタンを押して、発音して、終わったらまたボタンを押してください）';
         if (isWord) {
-          fields.answer = kanaField('f-answer', '回答（ひらがなで記入してください）');
+          fields.answer = kanaField('f-answer', isScene ? 'あなたの言い方（ひらがなで記入してください）' : '回答（ひらがなで記入してください）');
           var rb = recorderBlock('回答', 'main');
           recBlocks.push(rb);
           formWrap.appendChild(h('div', { class: 'card' }, fields.answer.el, h('p', { class: 'label', text: recLabel }), rb.el));
-          if (item.example) {
+          if (item.example && !isScene) {
             fields.example = kanaField('f-example', '例文の回答（ひらがなで記入してください）');
             var rb2 = recorderBlock('例文', 'example');
             recBlocks.push(rb2);
@@ -927,8 +938,9 @@
 
       body.appendChild(say('listen', h('p', { text: set.instruction || '' }), true));
       if (pic) body.appendChild(h('div', { class: 'q__pic' }, pic));
+      if (isScene && ctx) body.appendChild(ctx);
       body.appendChild(questionLine(item));
-      if (ctx) body.appendChild(ctx);
+      if (!isScene && ctx) body.appendChild(ctx);
       body.appendChild(formWrap);
       body.appendChild(statusWrap);
       // 端末に回答をとっておけないとき：1問ごとに送信を待つことを知らせておく
@@ -961,7 +973,7 @@
     function next(item, fields, nextBtn) {
       if (busy) return;
       clearError();
-      var isWord = item.type === '語彙';
+      var isWord = item.type === '語彙' || item.type === '場面';
       var answered = draft.status === '回答済';
       var out = { status: draft.status, answer: '', segPrompt: '', segAnswer: '', exampleAnswer: '', note: val(fields.note), noAudioReason: '', audio: [] };
 
