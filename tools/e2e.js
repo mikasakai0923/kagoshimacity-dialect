@@ -954,6 +954,53 @@ const PNG_1PX = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUl
     }
   });
 
+  console.log('場面の設問');
+  await test('場面の設問：標準語の文は見せず、絵と場面だけで「こんなとき、なんといいますか？」と聞く。答えは1つの欄と録音', async () => {
+    const sh = world.ss.getSheetByName('項目');
+    sh.appendRow([1, 0.5, 'X006', '場面', '物を落としたときの声', 'うっかり物を落としてしまったとき、思わず出る声', '', '', 'exclamation', true, '', '']);
+    const rowNo = sh.getLastRow();
+    world.call('addParticipants', 1);
+    const last = world.sheetRows('参加者').slice(-1)[0];
+    const who = { id: last[0], pw: last[1] };
+    const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, permissions: ['microphone'], locale: 'ja-JP' });
+    const p5 = await prepare(await ctx.newPage());
+    test.page = p5;
+    try {
+      await login(p5, who);
+      await p5.waitForSelector('.board .tile--here');
+      await practice(p5);
+      await openStep(p5);
+      await p5.waitForSelector('.q__scene');
+      assert.strictEqual((await p5.locator('.q__title').innerText()).trim(), 'こんなとき、なんといいますか？');
+      assert.ok(/うっかり物を落としてしまったとき/.test(await p5.locator('.q__scene').innerText()));
+      assert.strictEqual(await p5.locator('.q__prompt').count(), 0, '提示語が出ている');
+      assert.ok(!/物を落としたときの声/.test(await p5.locator('.page').innerText()), '短い名前（提示語・例文）が参加者に見えている');
+      assert.strictEqual(await p5.locator('.q__pic img, .q__pic svg').count() >= 1, true, '絵が出ていない');
+      assert.strictEqual(await p5.locator('#f-answer').count(), 1);
+      assert.strictEqual(await p5.locator('.segs').count(), 0);
+      assert.strictEqual(await p5.locator('#f-example').count(), 0);
+      if (shots) await p5.screenshot({ path: path.join(shots, 'live-20-scene.png'), fullPage: true });
+      await p5.click('text=つぎへ');
+      await p5.waitForFunction(() => /ひらがなで書いてください/.test(document.querySelector('.form-error').textContent));
+      await p5.fill('#f-answer', 'あっ');
+      await record(p5, 0, 700);
+      await p5.click('text=つぎへ');
+      await p5.waitForSelector('.q__prompt');
+      assert.ok(/頭/.test(await p5.locator('.q__prompt').innerText()), '次の設問（S001）に進んでいない');
+      await until(() => rowsOf(who.id).some(r => r[3] === 'X006'), '場面の回答が届く', 20000);
+      const head = world.sheetRows('回答')[0];
+      const r = rowsOf(who.id).find(r => r[3] === 'X006');
+      assert.strictEqual(r[head.indexOf('種別')], '場面');
+      assert.strictEqual(r[head.indexOf('提示語・例文')], '物を落としたときの声');
+      assert.strictEqual(r[head.indexOf('回答（地域の言葉）')], 'あっ');
+      assert.ok(r[head.indexOf('録音1')], '録音がついていない');
+    } finally {
+      sh.getRange(rowNo, 1, 1, 12).setValues([['', '', '', '', '', '', '', '', '', '', '', '']]);
+      await ctx.close();
+      test.page = page;
+    }
+  });
+
   console.log('そのほか');
   await test('保存先への送信は、決まった形（text/plain のPOST）だけ', async () => {
     assert.ok(world.control.calls.length > 10);

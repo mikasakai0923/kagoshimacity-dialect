@@ -150,6 +150,16 @@ test('「出す」を FALSE にした項目・重複した設問IDは渡さな�
   assert.deepStrictEqual(Array.from(b.items[b.items.length - 1].segments), ['種別なしで', '文節あり']);
   assert.strictEqual(b.steps[b.steps.length - 1].no, 9);
 });
+test('種別「場面」の項目は、場面の文と質問の文つきで渡す', () => {
+  const sh = w.ss.getSheetByName('項目');
+  sh.appendRow([9, 4, 'X004', '場面', '物を落としたときの声', 'うっかり物を落としてしまったとき、思わず出る声', '', '', 'exclamation', true, '', '']);
+  const b = w.post({ action: 'bootstrap', token });
+  const it = b.items[b.items.length - 1];
+  assert.strictEqual(it.id, 'X004'); assert.strictEqual(it.type, '場面');
+  assert.strictEqual(it.context, 'うっかり物を落としてしまったとき、思わず出る声');
+  assert.deepStrictEqual(Array.from(it.segments), []);
+  assert.strictEqual(b.settings.sceneQuestion, 'こんなとき、なんといいますか？');
+});
 test('にせの印（トークン）・期限切れは受けつけない', () => {
   assert.strictEqual(w.post({ action: 'bootstrap', token: token.slice(0, -3) + 'abc' }).error, 'auth');
   assert.strictEqual(w.post({ action: 'bootstrap', token: '' }).error, 'auth');

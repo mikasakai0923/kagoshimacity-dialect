@@ -376,6 +376,9 @@ h1:focus, h1:focus-visible { outline: none; }
 .q__prompt rt { font-size: 12px; }
 .q__rest { color: var(--ink); }
 .q__context { margin: 0 0 18px; color: var(--ink-2); font-size: 16px; line-height: 1.7; font-weight: 700; }
+.q__scene { margin: 0 0 14px; padding: 12px 16px 14px; border: 3px solid var(--ink); border-radius: 16px; background: var(--paper); font-weight: 700; font-size: 20px; line-height: 1.7; }
+.q__scene .tag { vertical-align: 0.25em; }
+.q__scene-text { display: block; margin-top: 4px; }
 .q__form { margin-top: 18px; }
 .q__example { margin-bottom: 14px; font-size: 17px; line-height: 1.8; }
 .q__example-text { font-weight: 700; font-size: 20px; }

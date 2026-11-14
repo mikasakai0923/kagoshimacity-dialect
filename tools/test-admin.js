@@ -79,14 +79,14 @@ test('持ち主が ?admin=1 で開くと、管理画面が出る', () => {
   const m = /var KS_BOOT = (\{[^\n]*?\});<\/script>/.exec(page);
   assert.ok(m, 'はじめの情報が見つからない');
   const boot = JSON.parse(m[1]);
-  assert.strictEqual(boot.mode, 'web'); assert.strictEqual(boot.version, '0.6.0'); assert.strictEqual(boot.hours, 12);
+  assert.strictEqual(boot.mode, 'web'); assert.strictEqual(boot.version, '0.7.0'); assert.strictEqual(boot.hours, 12);
   assert.strictEqual(admin('overview', {}, boot.token).ok, true);
   assert.ok(openAsWeb('OWNER@Example.com')._html, 'メールアドレスの大文字・小文字のちがいで開けない');
   assert.ok(openAsWeb(w.OWNER, { admin: '' })._html, '?admin だけでも開ける');
 });
 test('?admin を付けないときは、これまでどおり動作確認の返事をする', () => {
   const r = JSON.parse(openAsWeb('', {}).getContent());
-  assert.strictEqual(r.ok, true); assert.strictEqual(r.ready, true); assert.strictEqual(r.version, '0.6.0');
+  assert.strictEqual(r.ok, true); assert.strictEqual(r.ready, true); assert.strictEqual(r.version, '0.7.0');
   assert.ok(!/adm1\./.test(JSON.stringify(r)));
 });
 test('メニューから開くと、大きな窓で管理画面が出る', () => {
@@ -209,7 +209,7 @@ test('直近の回答は新しい順に8件。日時は数字（ミリ秒）で�
   assert.ok(!/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z/.test(text.replace(/"clientTime":"[^"]*"/g, '')), '日付がそのまま入っている');
 });
 test('設定・リンクを渡す。パスワードは「全体のようす」には入れない', () => {
-  assert.deepStrictEqual(ov.settings, { open: true, notice: '', instruction: setting('教示文'), wordQuestion: '「{語}」のことをなんといいますか？', sentenceQuestion: '「{文}」をなんといいますか？',
+  assert.deepStrictEqual(ov.settings, { open: true, notice: '', instruction: setting('教示文'), wordQuestion: '「{語}」のことをなんといいますか？', sentenceQuestion: '「{文}」をなんといいますか？', sceneQuestion: 'こんなとき、なんといいますか？',
     maxRecordSec: 20, noiseWarnDb: 20, idPrefix: 'K', siteUrl: '',
     mascot: '桜島大根', mascotName: '', scenery: '鹿児島', siteName: '', lead: '', about: '', dataPolicy: '', organizer: '', contact: '' });
   assert.ok(/^https:\/\/docs\.google\.com\/spreadsheets\/d\//.test(ov.links.spreadsheet));
@@ -673,7 +673,7 @@ test('文章・数字・頭文字・サイトのURLを保存できる。参加�
   const r = admin('saveSettings', { values });
   assert.strictEqual(r.ok, true, JSON.stringify(r));
   assert.deepStrictEqual(r.settings, { open: true, notice: '10/20 は、お休みします。', instruction: 'ふだんのことばで教えてください。', wordQuestion: '「{語}」は、なんといいますか？',
-    sentenceQuestion: '「{文}」は、なんといいますか？', maxRecordSec: 30, noiseWarnDb: 15, idPrefix: 'KA', siteUrl: 'https://example.github.io/site/',
+    sentenceQuestion: '「{文}」は、なんといいますか？', sceneQuestion: 'こんなとき、なんといいますか？', maxRecordSec: 30, noiseWarnDb: 15, idPrefix: 'KA', siteUrl: 'https://example.github.io/site/',
     mascot: '桜島大根', mascotName: '', scenery: '鹿児島', siteName: '', lead: '', about: '', dataPolicy: '', organizer: '', contact: '' });
   assert.strictEqual(setting('お知らせ'), '10/20 は、お休みします。');
   assert.strictEqual(setting('録音の上限（秒）'), 30); assert.strictEqual(setting('雑音の注意の目安（dB）'), 15);
@@ -847,7 +847,7 @@ test('下見：行ごとの直すところ（空のID・同じID・歩が数字�
   assert.ok(/設問IDが空/.test(at(2).messages[0]));
   assert.ok(/「歩」は 1〜999/.test(at(4).messages[0]));
   assert.ok(/3 行目にもあります/.test(at(5).messages[0]), at(5).messages[0]);
-  assert.ok(/「語彙」か「例文」/.test(at(6).messages[0]));
+  assert.ok(/「語彙」「例文」「場面」/.test(at(6).messages[0]));
   assert.ok(/長すぎます（301 文字/.test(at(7).messages[0]));
   assert.strictEqual(at(3), undefined); assert.strictEqual(at(8), undefined);
   assert.ok(r.plan.rowWarnings.some(x => x.row === 8 && /「出す」の「たぶん」/.test(x.messages[0])));
@@ -1026,6 +1026,28 @@ test('設問を足す：IDの重なりはことわる。順が空なら、その
   assert.ok(w.sheetRows('歩').slice(1).some(x => x[0] === 7), '歩の行が足される');
   assert.strictEqual(JSON.stringify(w.call('ksReadItems_').filter(i => i.step === 7).map(i => i.id)), JSON.stringify(['N003', 'N004']));
   assert.strictEqual(admin('addItem', { fields: { id: 'N005', step: 7, prompt: '' } }).error, 'invalid');
+});
+test('場面の設問：種別「場面」は場面の文が要る。文節は使わない。質問の文は設定で変えられる', () => {
+  let r = admin('addItem', { fields: { id: 'N006', step: 7, prompt: '物を落としたときの声', type: '場面' } });
+  assert.strictEqual(r.error, 'invalid'); assert.ok(/場面・意味・読み/.test(r.message), r.message);
+  r = admin('addItem', { fields: { id: 'N006', step: 7, prompt: '物を落としたときの声', type: '場面', context: 'うっかり物を落としてしまったとき、思わず出る声', art: 'exclamation' } });
+  assert.strictEqual(r.ok, true, JSON.stringify(r));
+  assert.deepStrictEqual([r.item.type, r.item.context, r.item.segments.length], ['場面', 'うっかり物を落としてしまったとき、思わず出る声', 0]);
+  r = admin('addItem', { fields: { id: 'N007', step: 7, prompt: 'x', type: '場面', context: '場面', segments: 'あ｜い' } });
+  assert.strictEqual(r.ok, true); assert.ok((r.warnings || []).some(x => /場面では使いません/.test(x)), JSON.stringify(r));
+  assert.strictEqual(admin('addItem', { fields: { id: 'N008', step: 7, prompt: 'x', type: '会話', context: '場面' } }).error, 'invalid');
+  const it = w.call('ksReadItems_').find(i => i.id === 'N006');
+  assert.strictEqual(it.type, '場面');
+  // 設定：場面の質問文
+  assert.strictEqual(admin('overview').settings.sceneQuestion, 'こんなとき、なんといいますか？');
+  r = admin('saveSettings', { values: { '場面の質問文': 'こういうとき、何と言いますか？' } });
+  assert.strictEqual(r.ok, true, JSON.stringify(r));
+  assert.strictEqual(admin('overview').settings.sceneQuestion, 'こういうとき、何と言いますか？');
+  assert.strictEqual(admin('saveSettings', { values: { '場面の質問文': '' } }).error, 'invalid');
+  const lg = w.post({ action: 'login', id: people[0].id, password: people[0].pw });
+  assert.strictEqual(w.post({ action: 'bootstrap', token: lg.token }).settings.sceneQuestion, 'こういうとき、何と言いますか？');
+  r = admin('saveSettings', { values: { '場面の質問文': 'こんなとき、なんといいますか？' } });
+  assert.strictEqual(r.ok, true);
 });
 test('歩の名前：直せる・足せる。長すぎる名前はことわる', () => {
   let r = admin('setStep', { no: 1, title: 'はじめの駅', icon: 'station' });
