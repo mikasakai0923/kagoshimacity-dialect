@@ -673,6 +673,11 @@
         el2.appendChild(h('span', { class: 'q__rest', text: set.sceneQuestion || 'こんなとき、なんといいますか？' }));
         return el2;
       }
+      if (item.type === '選択') {
+        // 選択の設問：場面と、候補の言い方を見せて、言えるかどうかを選んでもらう（標準語の文は見せない）
+        el2.appendChild(h('span', { class: 'q__rest', text: set.choiceQuestion || 'この場面で言えるのは、どれですか？' }));
+        return el2;
+      }
       var tpl = item.type === '語彙' ? (set.wordQuestion || '「{語}」のことをなんといいますか？') : (set.sentenceQuestion || '「{文}」をなんといいますか？');
       var m = /\{(語|文)\}/.exec(tpl);
       if (!m) {
@@ -829,8 +834,9 @@
       shownAt = Date.now();
 
       body.innerHTML = '';
-      var isScene = item.type === '場面';
-      var isWord = item.type === '語彙' || isScene;
+      var isChoice = item.type === '選択';
+      var isScene = item.type === '場面' || isChoice;          // どちらも、場面を大きく見せて、提示語・例文は見せない
+      var isWord = item.type === '語彙' || item.type === '場面';
       var pic = scene(item.art);
       var ctx = null;
       if (isScene) {
@@ -858,7 +864,32 @@
           return;
         }
         var recLabel = '録音（ボタンを押して、発音して、終わったらまたボタンを押してください）';
-        if (isWord) {
+        if (isChoice) {
+          // 候補の言い方（ア・イ）を見せて、言えるものを選んでもらう。そのあと、ふだんの言い方を書いて、録音してもらう
+          var cands = KS.choiceCandidates(item);
+          var opts = KS.choiceOptions(cands.length);
+          var group = h('div', { class: 'choice', role: 'radiogroup', 'aria-labelledby': 'choice-label' });
+          fields.choice = { group: group, inputs: [] };
+          opts.forEach(function (o, i) {
+            var id = 'f-choice-' + i;
+            var input = h('input', { type: 'radio', class: 'choice__input', name: 'f-choice', id: id, value: o.value, checked: draft.choice === o.value ? true : null });
+            input.addEventListener('change', function () { if (input.checked) { draft.choice = o.value; group.classList.remove('choice--missing'); clearError(); } });
+            fields.choice.inputs.push(input);
+            group.appendChild(h('label', { class: 'choice__opt', for: id }, input, h('span', { class: 'choice__label', text: o.label })));
+          });
+          formWrap.appendChild(h('div', { class: 'card' },
+            h('ol', { class: 'cands' }, cands.map(function (c, i) {
+              return h('li', { class: 'cand' }, h('span', { class: 'cand__mark', text: KS.CHOICE_MARKS.charAt(i) }),
+                h('span', { class: 'cand__text' }, KS.ruby(c)));
+            })),
+            h('p', { class: 'label', id: 'choice-label', text: 'あてはまるものを1つ選んでください' }), group));
+          fields.answer = kanaField('f-answer', 'この場面での、あなたのふだんの言い方（ひらがなで記入してください）');
+          var rbc = recorderBlock('回答', 'main');
+          recBlocks.push(rbc);
+          formWrap.appendChild(h('div', { class: 'card' }, fields.answer.el, h('p', { class: 'label', text: recLabel }), rbc.el));
+          fields.note = kanaField('f-note', '言い方によって意味や感じがちがうときは、教えてください', { optional: true, free: true, multiline: true });
+          formWrap.appendChild(h('div', { class: 'card' }, fields.note.el));
+        } else if (isWord) {
           fields.answer = kanaField('f-answer', isScene ? 'あなたの言い方（ひらがなで記入してください）' : '回答（ひらがなで記入してください）');
           var rb = recorderBlock('回答', 'main');
           recBlocks.push(rb);
@@ -973,13 +1004,20 @@
     function next(item, fields, nextBtn) {
       if (busy) return;
       clearError();
-      var isWord = item.type === '語彙' || item.type === '場面';
+      var isChoice = item.type === '選択';
+      var isWord = item.type === '語彙' || item.type === '場面' || isChoice;     // 回答の欄が1つの設問
       var answered = draft.status === '回答済';
       var out = { status: draft.status, answer: '', segPrompt: '', segAnswer: '', exampleAnswer: '', note: val(fields.note), noAudioReason: '', audio: [] };
 
       if (answered) {
         if (recs.some(function (r) { return r.isBusy(); })) return fail('録音を終えてから進んでください。');
         var emptyCells = 0;
+        if (isChoice) {
+          // 選んだ答えは、候補ごとの ○× にして「文節（提示）」「文節（回答）」の欄に入れる（例：候補1｜候補2 → ○｜×）
+          if (!draft.choice) { fields.choice.group.classList.add('choice--missing'); return fail('あてはまるものを1つ選んでください。', fields.choice.inputs[0]); }
+          out.segPrompt = KS.choiceCandidates(item).map(KS.plain).join('｜');
+          out.segAnswer = draft.choice;
+        }
         if (isWord) {
           out.answer = val(fields.answer);
           if (!out.answer) { fields.answer.input.classList.add('field__input--missing'); return fail('回答をひらがなで書いてください。', fields.answer.input); }

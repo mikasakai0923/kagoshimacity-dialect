@@ -2,7 +2,7 @@
 (function () {
   'use strict';
   var KS = window.KS = window.KS || {};
-  KS.VERSION = '0.5.0';
+  KS.VERSION = '0.6.0';
 
   // 日時を、日本時間の「2026-10-12T08:41:03+09:00」の形にする（端末の時計がどの国の設定でも、日本時間で書く）
   KS.jstStamp = function (date) {
@@ -61,6 +61,24 @@
     return frag;
   };
   KS.plain = function (text) { return String(text == null ? '' : text).replace(/《[^》]*》/g, ''); };
+
+  // 種別が「選択」の設問：候補の言い方（「文節の区切り」の欄に「｜」で区切って書いたもの。2つまで）と、選択肢。
+  // 選んだ答えは、候補ごとの ○× を「｜」でつないだ形（例：○｜×）で記録する
+  KS.CHOICE_MARKS = 'アイ';
+  KS.choiceCandidates = function (item) {
+    return ((item && item.segments) || []).map(function (c) { return String(c == null ? '' : c).trim(); }).filter(Boolean).slice(0, 2);
+  };
+  KS.choiceOptions = function (count) {
+    if (count >= 2) {
+      return [
+        { label: 'アだけ言える', value: '○｜×' },
+        { label: 'アもイも言える', value: '○｜○' },
+        { label: 'イだけ言える', value: '×｜○' },
+        { label: 'どちらも言えない', value: '×｜×' }
+      ];
+    }
+    return [{ label: '言える', value: '○' }, { label: '言えない', value: '×' }];
+  };
   // SVG の文字として入れるときの逃がし（& < > " '）
   KS.escapeHtml = function (text) {
     return String(text == null ? '' : text).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; });

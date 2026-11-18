@@ -160,6 +160,17 @@ test('種別「場面」の項目は、場面の文と質問の文つきで渡�
   assert.deepStrictEqual(Array.from(it.segments), []);
   assert.strictEqual(b.settings.sceneQuestion, 'こんなとき、なんといいますか？');
 });
+test('種別「選択」の項目は、場面・候補の言い方・質問の文つきで渡す', () => {
+  const sh = w.ss.getSheetByName('項目');
+  sh.appendRow([9, 5, 'X005', '選択', '落ちる・落ちそうなとき', '机のはしで、鉛筆がぐらぐらしています。', '', '鉛筆が落ちよる｜鉛筆が落ちちょる', 'asp-ochiru-1.svg', true, '', '']);
+  const b = w.post({ action: 'bootstrap', token });
+  const it = b.items[b.items.length - 1];
+  assert.strictEqual(it.id, 'X005'); assert.strictEqual(it.type, '選択');
+  assert.strictEqual(it.context, '机のはしで、鉛筆がぐらぐらしています。');
+  assert.deepStrictEqual(Array.from(it.segments), ['鉛筆が落ちよる', '鉛筆が落ちちょる']);
+  assert.strictEqual(it.art, 'asp-ochiru-1.svg');
+  assert.strictEqual(b.settings.choiceQuestion, 'この場面で言えるのは、どれですか？');
+});
 test('にせの印（トークン）・期限切れは受けつけない', () => {
   assert.strictEqual(w.post({ action: 'bootstrap', token: token.slice(0, -3) + 'abc' }).error, 'auth');
   assert.strictEqual(w.post({ action: 'bootstrap', token: '' }).error, 'auth');

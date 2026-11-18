@@ -79,14 +79,14 @@ test('持ち主が ?admin=1 で開くと、管理画面が出る', () => {
   const m = /var KS_BOOT = (\{[^\n]*?\});<\/script>/.exec(page);
   assert.ok(m, 'はじめの情報が見つからない');
   const boot = JSON.parse(m[1]);
-  assert.strictEqual(boot.mode, 'web'); assert.strictEqual(boot.version, '0.7.0'); assert.strictEqual(boot.hours, 12);
+  assert.strictEqual(boot.mode, 'web'); assert.strictEqual(boot.version, '0.8.0'); assert.strictEqual(boot.hours, 12);
   assert.strictEqual(admin('overview', {}, boot.token).ok, true);
   assert.ok(openAsWeb('OWNER@Example.com')._html, 'メールアドレスの大文字・小文字のちがいで開けない');
   assert.ok(openAsWeb(w.OWNER, { admin: '' })._html, '?admin だけでも開ける');
 });
 test('?admin を付けないときは、これまでどおり動作確認の返事をする', () => {
   const r = JSON.parse(openAsWeb('', {}).getContent());
-  assert.strictEqual(r.ok, true); assert.strictEqual(r.ready, true); assert.strictEqual(r.version, '0.7.0');
+  assert.strictEqual(r.ok, true); assert.strictEqual(r.ready, true); assert.strictEqual(r.version, '0.8.0');
   assert.ok(!/adm1\./.test(JSON.stringify(r)));
 });
 test('メニューから開くと、大きな窓で管理画面が出る', () => {
@@ -209,7 +209,7 @@ test('直近の回答は新しい順に8件。日時は数字（ミリ秒）で�
   assert.ok(!/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z/.test(text.replace(/"clientTime":"[^"]*"/g, '')), '日付がそのまま入っている');
 });
 test('設定・リンクを渡す。パスワードは「全体のようす」には入れない', () => {
-  assert.deepStrictEqual(ov.settings, { open: true, notice: '', instruction: setting('教示文'), wordQuestion: '「{語}」のことをなんといいますか？', sentenceQuestion: '「{文}」をなんといいますか？', sceneQuestion: 'こんなとき、なんといいますか？',
+  assert.deepStrictEqual(ov.settings, { open: true, notice: '', instruction: setting('教示文'), wordQuestion: '「{語}」のことをなんといいますか？', sentenceQuestion: '「{文}」をなんといいますか？', sceneQuestion: 'こんなとき、なんといいますか？', choiceQuestion: 'この場面で言えるのは、どれですか？',
     maxRecordSec: 20, noiseWarnDb: 20, idPrefix: 'K', siteUrl: '',
     mascot: '桜島大根', mascotName: '', scenery: '鹿児島', siteName: '', lead: '', about: '', dataPolicy: '', organizer: '', contact: '' });
   assert.ok(/^https:\/\/docs\.google\.com\/spreadsheets\/d\//.test(ov.links.spreadsheet));
@@ -673,7 +673,7 @@ test('文章・数字・頭文字・サイトのURLを保存できる。参加�
   const r = admin('saveSettings', { values });
   assert.strictEqual(r.ok, true, JSON.stringify(r));
   assert.deepStrictEqual(r.settings, { open: true, notice: '10/20 は、お休みします。', instruction: 'ふだんのことばで教えてください。', wordQuestion: '「{語}」は、なんといいますか？',
-    sentenceQuestion: '「{文}」は、なんといいますか？', sceneQuestion: 'こんなとき、なんといいますか？', maxRecordSec: 30, noiseWarnDb: 15, idPrefix: 'KA', siteUrl: 'https://example.github.io/site/',
+    sentenceQuestion: '「{文}」は、なんといいますか？', sceneQuestion: 'こんなとき、なんといいますか？', choiceQuestion: 'この場面で言えるのは、どれですか？', maxRecordSec: 30, noiseWarnDb: 15, idPrefix: 'KA', siteUrl: 'https://example.github.io/site/',
     mascot: '桜島大根', mascotName: '', scenery: '鹿児島', siteName: '', lead: '', about: '', dataPolicy: '', organizer: '', contact: '' });
   assert.strictEqual(setting('お知らせ'), '10/20 は、お休みします。');
   assert.strictEqual(setting('録音の上限（秒）'), 30); assert.strictEqual(setting('雑音の注意の目安（dB）'), 15);
@@ -847,7 +847,7 @@ test('下見：行ごとの直すところ（空のID・同じID・歩が数字�
   assert.ok(/設問IDが空/.test(at(2).messages[0]));
   assert.ok(/「歩」は 1〜999/.test(at(4).messages[0]));
   assert.ok(/3 行目にもあります/.test(at(5).messages[0]), at(5).messages[0]);
-  assert.ok(/「語彙」「例文」「場面」/.test(at(6).messages[0]));
+  assert.ok(/「語彙」「例文」「場面」「選択」/.test(at(6).messages[0]));
   assert.ok(/長すぎます（301 文字/.test(at(7).messages[0]));
   assert.strictEqual(at(3), undefined); assert.strictEqual(at(8), undefined);
   assert.ok(r.plan.rowWarnings.some(x => x.row === 8 && /「出す」の「たぶん」/.test(x.messages[0])));
@@ -1047,6 +1047,34 @@ test('場面の設問：種別「場面」は場面の文が要る。文節は�
   const lg = w.post({ action: 'login', id: people[0].id, password: people[0].pw });
   assert.strictEqual(w.post({ action: 'bootstrap', token: lg.token }).settings.sceneQuestion, 'こういうとき、何と言いますか？');
   r = admin('saveSettings', { values: { '場面の質問文': 'こんなとき、なんといいますか？' } });
+  assert.strictEqual(r.ok, true);
+});
+test('選択の設問：種別「選択」は、場面と候補の言い方（2つまで）が要る。質問の文は設定で変えられる', () => {
+  let r = admin('addItem', { fields: { id: 'N009', step: 7, prompt: '落ちる・落ちそうなとき', type: '選択', segments: '鉛筆が落ちよる｜鉛筆が落ちちょる' } });
+  assert.strictEqual(r.error, 'invalid'); assert.ok(/場面・意味・読み/.test(r.message), r.message);
+  r = admin('addItem', { fields: { id: 'N009', step: 7, prompt: '落ちる・落ちそうなとき', type: '選択', context: '机のはしで、鉛筆がぐらぐらしています。' } });
+  assert.strictEqual(r.error, 'invalid'); assert.ok(/候補の言い方/.test(r.message), r.message);
+  r = admin('addItem', { fields: { id: 'N009', step: 7, prompt: '落ちる・落ちそうなとき', type: '選択', context: '机のはしで、鉛筆がぐらぐらしています。', segments: 'あ｜い｜う' } });
+  assert.strictEqual(r.error, 'invalid'); assert.ok(/2つまで/.test(r.message), r.message);
+  r = admin('addItem', { fields: { id: 'N009', step: 7, prompt: '落ちる・落ちそうなとき', type: '選択', context: '机のはしで、鉛筆がぐらぐらしています。', segments: '鉛筆が落ちよる｜鉛筆が落ちちょる', art: 'asp-ochiru-1.svg' } });
+  assert.strictEqual(r.ok, true, JSON.stringify(r));
+  assert.deepStrictEqual([r.item.type, r.item.context, Array.from(r.item.segments).join('+')], ['選択', '机のはしで、鉛筆がぐらぐらしています。', '鉛筆が落ちよる+鉛筆が落ちちょる']);
+  assert.ok(!(r.warnings || []).length, JSON.stringify(r.warnings));
+  // 候補が1つでもよい（言える／言えない を聞く）
+  r = admin('addItem', { fields: { id: 'N010', step: 7, prompt: 'ある', type: '選択', context: '机の上に本があります。', segments: '本がありよる' } });
+  assert.strictEqual(r.ok, true, JSON.stringify(r));
+  const it = w.call('ksReadItems_').find(i => i.id === 'N009');
+  assert.strictEqual(it.type, '選択');
+  assert.deepStrictEqual(Array.from(it.segments), ['鉛筆が落ちよる', '鉛筆が落ちちょる']);
+  // 設定：選択の質問文
+  assert.strictEqual(admin('overview').settings.choiceQuestion, 'この場面で言えるのは、どれですか？');
+  r = admin('saveSettings', { values: { '選択の質問文': 'どの言い方ができますか？' } });
+  assert.strictEqual(r.ok, true, JSON.stringify(r));
+  assert.strictEqual(admin('overview').settings.choiceQuestion, 'どの言い方ができますか？');
+  assert.strictEqual(admin('saveSettings', { values: { '選択の質問文': '' } }).error, 'invalid');
+  const lg = w.post({ action: 'login', id: people[0].id, password: people[0].pw });
+  assert.strictEqual(w.post({ action: 'bootstrap', token: lg.token }).settings.choiceQuestion, 'どの言い方ができますか？');
+  r = admin('saveSettings', { values: { '選択の質問文': 'この場面で言えるのは、どれですか？' } });
   assert.strictEqual(r.ok, true);
 });
 test('歩の名前：直せる・足せる。長すぎる名前はことわる', () => {
