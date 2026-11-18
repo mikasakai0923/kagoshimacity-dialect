@@ -1001,6 +1001,73 @@ const PNG_1PX = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUl
     }
   });
 
+  console.log('選択の設問');
+  await test('選択の設問：場面と候補の言い方（ア・イ）を見せて、4つから選んでもらう。選んだ答えは ○× で届く', async () => {
+    const sh = world.ss.getSheetByName('項目');
+    sh.appendRow([1, 0.4, 'X007', '選択', '落ちる・落ちそうなとき', '机のはしで、鉛筆がぐらぐらしています。そばの人に、とっさに知らせます。', '', '鉛筆が落ちよる！｜鉛筆が落ちちょる！', 'asp-ochiru-1.svg', true, '', '']);
+    sh.appendRow([1, 0.45, 'X008', '選択', 'ある', '机の上に、本があります。', '', '本がありよる', 'book', true, '', '']);
+    const rowNo = sh.getLastRow() - 1;
+    world.call('addParticipants', 1);
+    const last = world.sheetRows('参加者').slice(-1)[0];
+    const who = { id: last[0], pw: last[1] };
+    const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, permissions: ['microphone'], locale: 'ja-JP' });
+    const p6 = await prepare(await ctx.newPage());
+    test.page = p6;
+    try {
+      await login(p6, who);
+      await p6.waitForSelector('.board .tile--here');
+      await practice(p6);
+      await openStep(p6);
+      await p6.waitForSelector('.cands');
+      assert.strictEqual((await p6.locator('.q__title').innerText()).trim(), 'この場面で言えるのは、どれですか？');
+      assert.ok(/鉛筆がぐらぐらしています/.test(await p6.locator('.q__scene').innerText()));
+      assert.strictEqual(await p6.locator('.q__prompt').count(), 0, '提示語が出ている');
+      assert.ok(!/落ちる・落ちそうなとき/.test(await p6.locator('.page').innerText()), '短い名前（提示語・例文）が参加者に見えている');
+      await p6.waitForFunction(() => { const im = document.querySelector('.q__pic img'); return im && im.complete && im.naturalWidth > 0; }, null, { timeout: 10000 });
+      assert.deepStrictEqual((await p6.locator('.cand').allInnerTexts()).map(t => t.replace(/\s+/g, '')), ['ア鉛筆が落ちよる！', 'イ鉛筆が落ちちょる！']);
+      assert.deepStrictEqual((await p6.locator('.choice__opt').allInnerTexts()).map(t => t.trim()), ['アだけ言える', 'アもイも言える', 'イだけ言える', 'どちらも言えない']);
+      assert.strictEqual(await p6.locator('.segs').count(), 0);
+      assert.strictEqual(await p6.locator('#f-answer').count(), 1);
+      if (shots) await p6.screenshot({ path: path.join(shots, 'live-21-choice.png'), fullPage: true });
+      // 選ばずに進もうとすると、止まる
+      await p6.fill('#f-answer', 'えんぴつが おちよっど');
+      await record(p6, 0, 700);
+      await p6.click('text=つぎへ');
+      await p6.waitForFunction(() => /あてはまるものを1つ選んでください/.test(document.querySelector('.form-error').textContent));
+      assert.strictEqual(await p6.locator('.choice--missing').count(), 1);
+      await p6.locator('.choice__opt', { hasText: 'アだけ言える' }).click();
+      assert.strictEqual(await p6.locator('.choice--missing').count(), 0);
+      if (shots) await p6.screenshot({ path: path.join(shots, 'live-22-choice-picked.png'), fullPage: true });
+      await p6.click('text=つぎへ');
+      // 候補が1つの設問：言える／言えない
+      await p6.waitForFunction(() => /本があります/.test((document.querySelector('.q__scene') || {}).textContent || ''));
+      assert.deepStrictEqual((await p6.locator('.choice__opt').allInnerTexts()).map(t => t.trim()), ['言える', '言えない']);
+      assert.strictEqual(await p6.locator('.cand').count(), 1);
+      assert.strictEqual(await p6.locator('.choice__input:checked').count(), 0, '前の設問の答えが残っている');
+      await p6.locator('.choice__opt', { hasText: '言えない' }).click();
+      await p6.fill('#f-answer', 'ほんが あっ');
+      await record(p6, 0, 700);
+      await p6.click('text=つぎへ');
+      await p6.waitForSelector('.q__prompt');
+      await until(() => rowsOf(who.id).some(r => r[3] === 'X008'), '選択の回答が届く', 20000);
+      const head = world.sheetRows('回答')[0];
+      const r = rowsOf(who.id).find(r => r[3] === 'X007');
+      assert.strictEqual(r[head.indexOf('種別')], '選択');
+      assert.strictEqual(r[head.indexOf('提示語・例文')], '落ちる・落ちそうなとき');
+      assert.strictEqual(r[head.indexOf('文節（提示）')], '鉛筆が落ちよる！｜鉛筆が落ちちょる！');
+      assert.strictEqual(r[head.indexOf('文節（回答）')], '○｜×');
+      assert.strictEqual(r[head.indexOf('回答（地域の言葉）')], 'えんぴつが おちよっど');
+      assert.ok(r[head.indexOf('録音1')], '録音がついていない');
+      const r2 = rowsOf(who.id).find(r => r[3] === 'X008');
+      assert.strictEqual(r2[head.indexOf('文節（提示）')], '本がありよる');
+      assert.strictEqual(r2[head.indexOf('文節（回答）')], '×');
+    } finally {
+      sh.getRange(rowNo, 1, 2, 12).setValues([['', '', '', '', '', '', '', '', '', '', '', ''], ['', '', '', '', '', '', '', '', '', '', '', '']]);
+      await ctx.close();
+      test.page = page;
+    }
+  });
+
   console.log('そのほか');
   await test('保存先への送信は、決まった形（text/plain のPOST）だけ', async () => {
     assert.ok(world.control.calls.length > 10);

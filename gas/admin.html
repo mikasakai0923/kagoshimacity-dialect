@@ -2666,7 +2666,7 @@ var KSQR = (function () {
     }
     var lockId = !isNew && it.answers > 0;
     f.id = h('input', { type: 'text', class: 'input', value: init.id, maxlength: '40', autocomplete: 'off', readonly: lockId ? true : null, 'data-autofocus': isNew ? true : null });
-    f.type = h('select', { class: 'select', onchange: paintKind }, h('option', { value: '語彙', text: '語彙（ことば）' }), h('option', { value: '例文', text: '例文（文）' }), h('option', { value: '場面', text: '場面（絵と場面だけ）' }));
+    f.type = h('select', { class: 'select', onchange: paintKind }, h('option', { value: '語彙', text: '語彙（ことば）' }), h('option', { value: '例文', text: '例文（文）' }), h('option', { value: '場面', text: '場面（絵と場面だけ）' }), h('option', { value: '選択', text: '選択（候補を見せて、言えるかを聞く）' }));
     f.type.value = init.type;
     f.prompt = h('textarea', { class: 'textarea', id: 'it-prompt', rows: '2', maxlength: String(lim.prompt), style: 'min-height:58px', 'data-autofocus': isNew ? null : true });
     f.prompt.value = init.prompt;
@@ -2683,23 +2683,34 @@ var KSQR = (function () {
     f.aim.value = init.aim;
     var segPreview = h('p', { class: 'field__hint', id: 'it-seg-preview' });
     var wordBox = h('div', { class: 'kindbox' }, field('example', '提案例文（語彙）', f.example, '「この語を使った文を言ってください」と、ことばの次に聞く文です。空欄なら聞きません。'));
-    var sentBox = h('div', { class: 'kindbox' }, field('segments', '文節の区切り', f.segments, '文節のあいだに「｜」を入れます（例：雨が｜降っている）。空欄なら、文全体を1つの欄で答えてもらいます。'), segPreview);
+    var SEG_HINT = '文節のあいだに「｜」を入れます（例：雨が｜降っている）。空欄なら、文全体を1つの欄で答えてもらいます。';
+    var CAND_HINT = '参加者に見せる候補の言い方です。2つのときは「｜」で区切ります（例：雨が降りよる｜雨が降っちょる）。1つ目が「ア」、2つ目が「イ」として出ます。';
+    var segField = field('segments', '文節の区切り', f.segments, SEG_HINT);
+    var segLabel = segField.querySelector('.field__label'), segHint = segField.querySelector('.field__hint');
+    var sentBox = h('div', { class: 'kindbox' }, segField, segPreview);
     function paintKind() {
-      var kind = f.type.value, sent = kind === '例文', scene = kind === '場面';
-      wordBox.style.display = kind === '語彙' ? '' : 'none'; sentBox.style.display = sent ? '' : 'none';
-      promptHint.textContent = scene ? '場面の設問では、参加者には見せません。一覧や回答の表に出す短い名前を書きます（例：物を落としたときの声）。' : PROMPT_HINT;
-      contextHint.textContent = scene ? '参加者に見せる場面です（例：うっかり物を落としてしまったとき、思わず出る声）。場面の設問では必ず書きます。' : CONTEXT_HINT;
+      var kind = f.type.value, sent = kind === '例文', choice = kind === '選択', scene = kind === '場面' || choice;
+      wordBox.style.display = kind === '語彙' ? '' : 'none'; sentBox.style.display = (sent || choice) ? '' : 'none';
+      segLabel.textContent = choice ? '候補の言い方（シートでは「文節の区切り」の欄）' : '文節の区切り';
+      segHint.textContent = choice ? CAND_HINT : SEG_HINT;
+      promptHint.textContent = scene ? (choice ? '選択の設問では、参加者には見せません。一覧や回答の表に出す短い名前を書きます（例：落ちる・落ちそうなとき）。' : '場面の設問では、参加者には見せません。一覧や回答の表に出す短い名前を書きます（例：物を落としたときの声）。') : PROMPT_HINT;
+      contextHint.textContent = scene ? (choice ? '参加者に見せる場面です（例：机のはしで鉛筆がぐらぐらしています）。選択の設問では必ず書きます。' : '参加者に見せる場面です（例：うっかり物を落としてしまったとき、思わず出る声）。場面の設問では必ず書きます。') : CONTEXT_HINT;
       sceneNote.style.display = scene ? '' : 'none';
+      sceneNoteText.textContent = choice ? CHOICE_NOTE : SCENE_NOTE;
       paintSegs();
     }
     var PROMPT_HINT = '参加者に「これをなんといいますか？」と見せる、ことばや文です。ふりがなは「鯖《さば》」のように書けます。';
     var CONTEXT_HINT = '提示語・例文の下に、小さく出ます（例：読み：あたま、場面：外を見て知らせる）。';
     var promptHint = h('p', { class: 'field__hint', id: 'it-prompt-hint', text: PROMPT_HINT });
     var contextHint = h('p', { class: 'field__hint', id: 'it-context-hint', text: CONTEXT_HINT });
-    var sceneNote = h('div', { class: 'notice', role: 'status', id: 'it-scene-note' }, h('span', { svg: ICON.eye }), h('span', { text: '場面の設問は、標準語の文を見せずに、絵と場面だけで「こんなとき、なんといいますか？」と聞きます（質問の文は「設定」で変えられます）。イラストを入れるのがおすすめです。' }));
+    var SCENE_NOTE = '場面の設問は、標準語の文を見せずに、絵と場面だけで「こんなとき、なんといいますか？」と聞きます（質問の文は「設定」で変えられます）。イラストを入れるのがおすすめです。';
+    var CHOICE_NOTE = '選択の設問は、絵と場面のあとに候補の言い方（ア・イ）を見せて、「アだけ言える／アもイも言える／イだけ言える／どちらも言えない」から選んでもらいます（候補が1つなら「言える／言えない」）。そのあと、ふだんの言い方を書いて、録音してもらいます。選んだ答えは、回答の表に候補ごとの ○× で入ります。';
+    var sceneNoteText = h('span', { text: SCENE_NOTE });
+    var sceneNote = h('div', { class: 'notice', role: 'status', id: 'it-scene-note' }, h('span', { svg: ICON.eye }), sceneNoteText);
     function paintSegs() {
       var parts = f.segments.value.split(/[｜|／\/]/).map(function (s) { return s.trim(); }).filter(Boolean);
       if (!parts.length) { segPreview.textContent = ''; return; }
+      if (f.type.value === '選択') { segPreview.textContent = '候補 ' + parts.length + ' つ：' + parts.map(function (t, i) { return (i < 2 ? 'アイ'.charAt(i) : '？') + '「' + t + '」'; }).join('　') + (parts.length > 2 ? '　※ 候補は2つまでです' : ''); return; }
       var plain = function (s) { return String(s).replace(/《[^》]*》/g, '').replace(/[。、．，！？!?「」『』（）()［］\[\]\s｜|／\/・…]/g, ''); };
       segPreview.textContent = parts.length + ' 文節：' + parts.join(' ／ ') + (plain(parts.join('')) !== plain(f.prompt.value) ? '　※ つなげた文字が、提示語・例文と合いません' : '');
     }
@@ -2726,7 +2737,7 @@ var KSQR = (function () {
     function idKey(text) { var s = String(text == null ? '' : text); if (s.normalize) s = s.normalize('NFKC'); return s.replace(/\s/g, ''); }
     function read() {
       var v = { type: f.type.value, prompt: f.prompt.value.trim(), context: f.context.value.trim(), example: f.example.value.trim(),
-                segments: f.type.value === '例文' ? f.segments.value.trim() : '', step: fold(f.step.value).replace(/\s/g, ''), order: fold(f.order.value).replace(/\s/g, ''),
+                segments: (f.type.value === '例文' || f.type.value === '選択') ? f.segments.value.trim() : '', step: fold(f.step.value).replace(/\s/g, ''), order: fold(f.order.value).replace(/\s/g, ''),
                 show: f.show.checked, art: f.art.value.trim(), note: f.note.value.trim(), aim: f.aim.value.trim() };
       if (!lockId) v.id = idKey(f.id.value);                   // 設問IDは、大文字小文字をそのまま（回答があるときは変えないので送らない）
       return v;
@@ -2734,8 +2745,14 @@ var KSQR = (function () {
     function check(v) {
       if (!lockId && !v.id) return { msg: '設問IDを入れてください。', el: f.id };
       if (!lockId && /[｜|／\/,;"'`\\<>=]/.test(v.id)) return { msg: '設問IDに、使えない記号（| / , ; = 引用符 など）が入っています。', el: f.id };
-      if (!v.prompt) return { msg: v.type === '場面' ? '提示語・例文に、一覧に出す短い名前を入れてください。' : '提示語・例文を入れてください。', el: f.prompt };
+      if (!v.prompt) return { msg: (v.type === '場面' || v.type === '選択') ? '提示語・例文に、一覧に出す短い名前を入れてください。' : '提示語・例文を入れてください。', el: f.prompt };
       if (v.type === '場面' && !v.context) return { msg: '場面の設問は、「場面・意味・読み」に参加者に見せる場面を書いてください。', el: f.context };
+      if (v.type === '選択' && !v.context) return { msg: '選択の設問は、「場面・意味・読み」に参加者に見せる場面を書いてください。', el: f.context };
+      if (v.type === '選択') {
+        var cands = v.segments.split(/[｜|／\/]/).map(function (t) { return t.trim(); }).filter(Boolean);
+        if (!cands.length) return { msg: '選択の設問は、候補の言い方を書いてください（2つのときは「｜」で区切ります）。', el: f.segments };
+        if (cands.length > 2) return { msg: '選択の設問の候補は、2つまでです。', el: f.segments };
+      }
       if (!/^\d{1,3}$/.test(v.step) || +v.step < 1) return { msg: '歩は 1〜999 の数字にしてください。', el: f.step };
       if (v.order !== '' && !/^\d{1,4}(\.\d{1,3})?$/.test(v.order)) return { msg: '順は数字にしてください。', el: f.order };
       return null;
@@ -3178,7 +3195,7 @@ var KSQR = (function () {
   /* ============================================================
    * 設定
    * ============================================================ */
-  var SETTING_KEYS = { notice: 'お知らせ', instruction: '教示文', wordQuestion: '語彙の質問文', sentenceQuestion: '例文の質問文', sceneQuestion: '場面の質問文',
+  var SETTING_KEYS = { notice: 'お知らせ', instruction: '教示文', wordQuestion: '語彙の質問文', sentenceQuestion: '例文の質問文', sceneQuestion: '場面の質問文', choiceQuestion: '選択の質問文',
     maxRecordSec: '録音の上限（秒）', noiseWarnDb: '雑音の注意の目安（dB）', idPrefix: '参加者ナンバーの頭文字', siteUrl: 'サイトのURL',
     mascot: '案内役', mascotName: '案内役の名前', scenery: '景色', siteName: 'サイトの名前', lead: '紹介のことば', about: '紹介文',
     dataPolicy: '回答と声のあつかい', organizer: '実施者', contact: '問い合わせ先' };
@@ -3255,7 +3272,8 @@ var KSQR = (function () {
         field('instruction', '教示文', 'すべての設問の上に出る説明です。', 'textarea', { maxlength: '400' }),
         field('wordQuestion', '語彙の質問文', '{語} のところに、提示語が入ります。', 'text', { maxlength: '200' }),
         field('sentenceQuestion', '例文の質問文', '{文} のところに、例文が入ります。', 'text', { maxlength: '200' }),
-        field('sceneQuestion', '場面の質問文', '種別が「場面」の設問（絵と場面だけで聞く設問）の上に出ます。', 'text', { maxlength: '200' })),
+        field('sceneQuestion', '場面の質問文', '種別が「場面」の設問（絵と場面だけで聞く設問）の上に出ます。', 'text', { maxlength: '200' }),
+        field('choiceQuestion', '選択の質問文', '種別が「選択」の設問（候補の言い方を見せて、言えるかどうかを選んでもらう設問）の上に出ます。', 'text', { maxlength: '200' })),
       h('section', { class: 'card' },
         h('div', { class: 'card__head' }, h('h2', { class: 'card__title', text: '録音' })),
         field('maxRecordSec', '録音の上限（秒）', '1回の録音の長さの上限です（5〜60）。長くすると、通信のおそい場所では送信に時間がかかります。', 'number', { maxlength: '3', inputmode: 'numeric', autocomplete: 'off' }),

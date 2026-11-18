@@ -272,6 +272,18 @@ h1:focus, h1:focus-visible { outline: none; }
 .seg__input:focus { box-shadow: inset 0 0 0 4px var(--sun); }
 .segs--missing .seg { border-color: var(--rec); }
 .segs--missing .seg__input { background: var(--rec-pale); }
+/* 種別「選択」：候補の言い方（ア・イ）と、選択肢 */
+.cands { list-style: none; margin: 0 0 16px; padding: 0; display: grid; gap: 10px; }
+.cand { display: flex; align-items: flex-start; gap: 10px; padding: 12px; border: 3px solid var(--ink); border-radius: 14px; background: var(--sun-pale); font-weight: 700; font-size: 18px; line-height: 1.6; }
+.cand__mark { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 29px; height: 29px; border-radius: 50%; background: var(--ink); color: #fff; font-size: 16px; line-height: 1; }
+.cand__text { min-width: 0; overflow-wrap: anywhere; word-break: auto-phrase; }
+.cand__text rt { font-size: 11px; }
+.choice { display: grid; gap: 10px; }
+.choice__opt { display: flex; align-items: center; gap: 12px; min-height: 52px; padding: 8px 14px; border: 2px solid var(--ink); border-radius: 14px; background: var(--paper); font-weight: 700; font-size: 18px; line-height: 1.5; cursor: pointer; }
+.choice__input { flex: none; width: 24px; height: 24px; margin: 0; accent-color: var(--bay-deep); }
+.choice__opt:has(.choice__input:checked) { background: var(--bay-pale); box-shadow: 0 3px 0 var(--ink); }
+.choice__opt:has(.choice__input:focus-visible) { outline: 3px solid var(--bay-deep); outline-offset: 2px; }
+.choice--missing .choice__opt { border-color: var(--rec); background: var(--rec-pale); }
 
 /* ---------- 紹介ページ ---------- */
 .intro { padding-top: 12px; }

@@ -18,13 +18,14 @@
       wordQuestion: '「{語}」のことをなんといいますか？',
       sentenceQuestion: '「{文}」をなんといいますか？',
       sceneQuestion: 'こんなとき、なんといいますか？',
+      choiceQuestion: 'この場面で言えるのは、どれですか？',
       notice: '',
       maxRecordSec: 20,
       noiseWarnDb: 20
     },
     steps: [
       { no: 1, title: '鹿児島中央駅', icon: 'station', count: 3 },
-      { no: 2, title: '桜島', icon: 'volcano', count: 3 }
+      { no: 2, title: '桜島', icon: 'volcano', count: 4 }
     ],
     items: [
       { id: 'S001', type: '語彙', step: 1, order: 1, prompt: '頭', context: '読み：あたま', example: '', segments: [], art: 'head' },
@@ -33,7 +34,9 @@
       { id: 'S004', type: '例文', step: 2, order: 1, prompt: '雨が降っている。', context: '外を見て知らせる。', example: '', segments: ['雨が', '降っている'], art: 'rain umbrella' },
       { id: 'S005', type: '例文', step: 2, order: 2, prompt: '猫が魚を食べた。', context: '', example: '', segments: ['猫が', '魚を', '食べた'], art: 'cat fish' },
       // 場面の設問：標準語の文は見せず、絵と場面だけで聞く
-      { id: 'S006', type: '場面', step: 2, order: 3, prompt: '物を落としたときの声', context: 'うっかり物を落としてしまったとき、思わず出る声', example: '', segments: [], art: 'exclamation' }
+      { id: 'S006', type: '場面', step: 2, order: 3, prompt: '物を落としたときの声', context: 'うっかり物を落としてしまったとき、思わず出る声', example: '', segments: [], art: 'exclamation' },
+      // 選択の設問：場面と候補の言い方（ア・イ）を見せて、言えるかどうかを選んでもらう
+      { id: 'S007', type: '選択', step: 2, order: 4, prompt: '落ちる・落ちそうなとき', context: '机のはしで、鉛筆がぐらぐらしています。そばの人に、とっさに知らせます。', example: '', segments: ['鉛筆が落ちよる！', '鉛筆が落ちちょる！'], art: 'asp-ochiru-1.svg' }
     ]
   };
 })();
