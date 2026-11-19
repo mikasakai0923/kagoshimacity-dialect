@@ -302,8 +302,16 @@ const PNG_1PX = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUl
     await page.click('text=この歩をおえる');
     assert.ok(/例文の録音がまだ/.test(await page.locator('.form-error').innerText()));
     await record(page, 1, 900);
-    world.control.delayMs = 1500;           // 保存先の返事をおくらせて、「送信中」の表示を確かめる
+    world.control.delayMs = 3000;           // 保存先の返事をおくらせて、「送信中」の表示を確かめる
     await page.click('text=この歩をおえる');
+    // 歩きおえたら、まず回答の一覧が出る（書いた内容を確かめてから、クリアの画面へ）
+    await page.waitForSelector('.page--review');
+    assert.strictEqual(hash(page), '#/step/1/review');
+    assert.deepStrictEqual((await page.locator('.rv__line--answer').allInnerTexts()).map(t => t.trim()), ['びんた', 'びんたが いて', 'め']);
+    assert.ok(/例文\s*めが ふとか/.test(await page.locator('.rv').nth(2).innerText()));
+    assert.ok(/ほかに\s*=1\+1 あたまともいう/.test(await page.locator('.rv').nth(0).innerText()));
+    assert.strictEqual(await page.locator('.rv__fix').count(), 3);
+    await page.getByRole('button', { name: 'これでよい' }).click();
     await page.waitForSelector('.clear__title');
     assert.strictEqual(hash(page), '#/clear/1');
     assert.ok(/送信しています[\s\S]*閉じないでください/.test(await page.locator('.sendbox').innerText()), await page.locator('.sendbox').innerText());
@@ -366,6 +374,10 @@ const PNG_1PX = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUl
     await page.click('text=使わない（聞いたことはあるが');
     await page.fill('#f-note', 'ねこはおらん');
     await page.click('text=この歩をおえる');
+    await page.waitForSelector('.page--review');
+    assert.strictEqual((await page.locator('.rv__line--answer').innerText()).trim(), 'あめが ふっちょっ', '読みこみ直す前に答えた内容が、一覧に出ていない');
+    assert.ok(/「使わない」として記録[\s\S]*メモ\s*ねこはおらん/.test(await page.locator('.rv').nth(1).innerText()), await page.locator('.rv').nth(1).innerText());
+    await page.getByRole('button', { name: 'これでよい' }).click();
     await page.waitForSelector('.clear__title');
     await untilRows(5);
     const r = rows()[4];
@@ -373,12 +385,16 @@ const PNG_1PX = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUl
     assert.ok(/ゴール/.test(await page.locator('.clear__title').innerText()));
     await shot(page, 'live-09-goal');
   });
-  await test('「もう一度こたえる」と行が増える。「録音なし」はその歩のあいだだけ。回答は書かれたとおりに保存される', async () => {
+  await test('「はじめから全部こたえ直す」と行が増える。「録音なし」はその歩のあいだだけ。回答は書かれたとおりに保存される', async () => {
     await page.click('text=地図にもどる');
     await page.waitForSelector('.board .tile');
     await page.locator('.tile--done').nth(2).click();
-    await page.getByRole('button', { name: 'もう一度こたえる' }).click();
+    await page.getByRole('button', { name: '回答を見る・直す' }).click();
+    await page.waitForSelector('.page--review');
+    assert.strictEqual(await page.getByRole('button', { name: 'これでよい' }).count(), 0, '地図から開いた一覧に「これでよい」が出ている');
+    await page.getByRole('button', { name: 'この歩を、はじめから全部こたえ直す' }).click();
     await page.waitForSelector('#f-seg-0');
+    assert.strictEqual(await page.inputValue('#f-seg-0'), '', '全部こたえ直すときは、前の答えを入れない');
     await page.click('text=マイクが使えないとき');
     await page.getByRole('button', { name: '録音なしで進む' }).click();
     await page.waitForSelector('.rec--off');
@@ -395,7 +411,8 @@ const PNG_1PX = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUl
     await page.waitForSelector('.board .tile');
     // 開き直すと、また録音をためしてもらう
     await page.locator('.tile--done').nth(2).click();
-    await page.getByRole('button', { name: 'もう一度こたえる' }).click();
+    await page.getByRole('button', { name: '回答を見る・直す' }).click();
+    await page.getByRole('button', { name: 'この歩を、はじめから全部こたえ直す' }).click();
     await page.waitForSelector('#f-seg-0');
     assert.strictEqual(await page.locator('.rec--off').count(), 0);
     assert.strictEqual(await page.locator('.rec__btn').count(), 1);
@@ -1164,6 +1181,269 @@ const PNG_1PX = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUl
       const r = rowsOf(who.id).find(r => r[3] === 'X011');
       assert.strictEqual(r[head.indexOf('回答の状態')], '思い出せない');
       assert.strictEqual(r[head.indexOf('別形・意味・補足')], '');
+    } finally {
+      sh.getRange(rowNo, 1, 1, 12).setValues([['', '', '', '', '', '', '', '', '', '', '', '']]);
+      await ctx.close();
+      test.page = page;
+    }
+  });
+
+  console.log('もどる・直す');
+  await test('ひとつ前の問題にもどる：前の答えが入った画面が出る。何も変えなければ行は増えず、直したら録音し直して新しい行になる', async () => {
+    world.call('addParticipants', 1);
+    const last = world.sheetRows('参加者').slice(-1)[0];
+    const who = { id: last[0], pw: last[1] };
+    const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, permissions: ['microphone'], locale: 'ja-JP' });
+    const p9 = await prepare(await ctx.newPage());
+    test.page = p9;
+    const nextBtn = () => p9.getByRole('button', { name: 'つぎへ', exact: true });
+    const backBtn = () => p9.getByRole('button', { name: 'ひとつ前の問題にもどる' });
+    const head = world.sheetRows('回答')[0];
+    try {
+      await login(p9, who);
+      await p9.waitForSelector('.board .tile--here');
+      await practice(p9);
+      await openStep(p9);
+      await p9.waitForSelector('#f-answer');
+      assert.strictEqual(await backBtn().count(), 0, '1問目に「ひとつ前の問題にもどる」が出ている');
+      await p9.fill('#f-answer', 'びんた');
+      await p9.fill('#f-note', 'あたま とも');
+      await record(p9, 0, 700);
+      await nextBtn().click();
+      await p9.waitForSelector('.segs');
+      await until(() => rowsOf(who.id).length === 1, '1問目の保存');
+      // 何も書いていなければ、確かめずにもどる。前の答えが入っていて、録音は入っていない
+      assert.strictEqual(await backBtn().count(), 1);
+      await backBtn().click();
+      await p9.waitForSelector('.q__editing');
+      assert.ok(/もう答えてあります。\s*直すときは、書きなおして、録音もしなおしてください/.test(await p9.locator('.q__editing').innerText()));
+      assert.strictEqual(await p9.inputValue('#f-answer'), 'びんた');
+      assert.strictEqual(await p9.inputValue('#f-note'), 'あたま とも');
+      assert.strictEqual(await p9.locator('.progress__count').innerText(), '1 / 3');
+      assert.strictEqual(await recState(p9, 0), 'idle');
+      assert.strictEqual(await p9.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true, '横にはみ出している');
+      if (shots) await p9.screenshot({ path: path.join(shots, 'live-25-back-editing.png'), fullPage: true });
+      // 何も変えずに「つぎへ」：行は増えず、もとの問題にもどる
+      await nextBtn().click();
+      await p9.waitForSelector('.segs');
+      assert.strictEqual(await p9.locator('.q__editing').count(), 0);
+      await p9.waitForTimeout(600);
+      assert.strictEqual(rowsOf(who.id).length, 1, '何も変えていないのに行が増えた');
+      // 書きかけがあるときは、確かめる
+      await p9.fill('#f-seg-0', 'びんたが');
+      await backBtn().click();
+      await p9.waitForSelector('.dialog');
+      assert.ok(/ひとつ前の問題にもどりますか？/.test(await p9.locator('.dialog__title').innerText()));
+      await p9.getByRole('button', { name: 'つづける' }).click();
+      assert.strictEqual(await p9.inputValue('#f-seg-0'), 'びんたが');
+      await backBtn().click();
+      await p9.getByRole('button', { name: 'もどる', exact: true }).click();
+      await p9.waitForSelector('.q__editing');
+      // 直したら、録音もし直してもらう
+      await p9.fill('#f-answer', 'びんたん');
+      await nextBtn().click();
+      await p9.waitForFunction(() => /録音がまだです/.test(document.querySelector('.form-error').textContent));
+      await record(p9, 0, 700);
+      await nextBtn().click();
+      await p9.waitForSelector('.segs');
+      assert.strictEqual(await p9.inputValue('#f-seg-0'), '', 'もどってきた問題に、前の書きかけが残っている');
+      await until(() => rowsOf(who.id).length === 2, '直した回答の保存', 20000);
+      const r = rowsOf(who.id);
+      assert.strictEqual(r[0][head.indexOf('回答（地域の言葉）')], 'びんた');
+      assert.strictEqual(r[1][head.indexOf('設問ID')], 'S001');
+      assert.strictEqual(r[1][head.indexOf('回答（地域の言葉）')], 'びんたん');
+      assert.strictEqual(r[1][head.indexOf('別形・意味・補足')], 'あたま とも');
+      assert.ok(r[1][head.indexOf('録音1')] && r[1][head.indexOf('録音1')] !== r[0][head.indexOf('録音1')], '直した回答に、新しい録音がついていない');
+      // 2問目に答えてから、2回つづけてもどれる（1問目まで）。「つぎへ」で順にもどってくる
+      await p9.fill('#f-seg-0', 'びんたが'); await p9.fill('#f-seg-1', 'いて');
+      await record(p9, 0, 700);
+      await nextBtn().click();
+      await p9.waitForSelector('#f-example');
+      await backBtn().click();
+      await p9.waitForSelector('.q__editing');
+      assert.strictEqual(await p9.inputValue('#f-seg-1'), 'いて');
+      await backBtn().click();
+      await p9.waitForFunction(() => { const a = document.querySelector('#f-answer'); return a && a.value === 'びんたん'; });
+      assert.strictEqual(await backBtn().count(), 0);
+      await nextBtn().click();
+      await p9.waitForFunction(() => { const a = document.querySelector('#f-seg-0'); return a && a.value === 'びんたが'; });
+      await nextBtn().click();
+      await p9.waitForSelector('#f-example');
+      assert.strictEqual(await p9.locator('.q__editing').count(), 0);
+      assert.strictEqual(await p9.locator('.progress__count').innerText(), '3 / 3');
+      await p9.waitForTimeout(600);
+      assert.strictEqual(rowsOf(who.id).length, 3, 'もどって見ただけで行が増えた');
+    } finally {
+      await ctx.close();
+      test.page = page;
+    }
+  });
+  await test('歩のおわりの一覧：書いた内容が並び、「直す」でその1問だけを直せる。「これでよい」でクリアへ。地図からも開ける', async () => {
+    world.call('addParticipants', 1);
+    const last = world.sheetRows('参加者').slice(-1)[0];
+    const who = { id: last[0], pw: last[1] };
+    const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, permissions: ['microphone'], locale: 'ja-JP' });
+    const p10 = await prepare(await ctx.newPage());
+    test.page = p10;
+    const head = world.sheetRows('回答')[0];
+    const answers = () => p10.locator('.rv__line--answer').allInnerTexts().then(a => a.map(t => t.trim()));
+    try {
+      await login(p10, who);
+      await p10.waitForSelector('.board .tile--here');
+      await practice(p10);
+      await openStep(p10);
+      await p10.waitForSelector('#f-answer');
+      await p10.fill('#f-answer', 'びんた'); await record(p10, 0, 700);
+      await p10.getByRole('button', { name: 'つぎへ', exact: true }).click();
+      await p10.waitForSelector('.segs');
+      await p10.fill('#f-seg-0', 'びんたが'); await p10.fill('#f-seg-1', 'いて'); await record(p10, 0, 700);
+      await p10.getByRole('button', { name: 'つぎへ', exact: true }).click();
+      await p10.waitForSelector('#f-example');
+      await p10.click('text=知らない・使わない・思い出せないとき');
+      await p10.click('text=思い出せない（いまは出てこない）');
+      await p10.waitForSelector('.card--status');
+      await p10.click('text=この歩をおえる');
+      await p10.waitForSelector('.page--review');
+      assert.ok(/1歩目[\s\S]*の回答/.test(await p10.locator('.rv__title').innerText()));
+      assert.strictEqual(await p10.locator('.rv').count(), 3);
+      assert.deepStrictEqual(await answers(), ['びんた', 'びんたが いて']);
+      assert.ok(/「思い出せない」として記録/.test(await p10.locator('.rv').nth(2).innerText()));
+      assert.ok(/頭が痛い。/.test(await p10.locator('.rv').nth(1).locator('.rv__prompt').innerText()));
+      assert.strictEqual(await p10.locator('.iconbtn[aria-label="地図にもどる"]').count(), 0, '歩きおえたばかりの一覧に、地図へもどるボタンが出ている');
+      assert.strictEqual(await p10.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true, '横にはみ出している');
+      if (shots) await p10.screenshot({ path: path.join(shots, 'live-26-review.png'), fullPage: true });
+      await until(() => rowsOf(who.id).length === 3, '3問の保存', 20000);
+      // 「直す」：その1問だけが、前の答えが入った形で開く。何も変えなければ、行は増えない
+      await p10.locator('.rv__fix').nth(1).click();
+      await p10.waitForSelector('.q__editing');
+      assert.strictEqual(hash(p10), '#/step/1/fix/2');
+      assert.strictEqual(await p10.inputValue('#f-seg-0'), 'びんたが');
+      assert.strictEqual(await p10.locator('.progress__count').innerText(), '2 / 3');
+      assert.strictEqual(await p10.getByRole('button', { name: 'ひとつ前の問題にもどる' }).count(), 0);
+      if (shots) await p10.screenshot({ path: path.join(shots, 'live-27-fix.png'), fullPage: true });
+      await p10.getByRole('button', { name: '保存して一覧にもどる' }).click();
+      await p10.waitForSelector('.page--review');
+      await p10.waitForTimeout(500);
+      assert.strictEqual(rowsOf(who.id).length, 3, '何も変えていないのに行が増えた');
+      // 直して保存すると、一覧が新しい内容になり、表に新しい行が足される（前の行は残る）
+      await p10.locator('.rv__fix').nth(1).click();
+      await p10.waitForSelector('.q__editing');
+      await p10.fill('#f-seg-1', 'いたか');
+      await record(p10, 0, 700);
+      await p10.getByRole('button', { name: '保存して一覧にもどる' }).click();
+      await p10.waitForSelector('.page--review');
+      assert.deepStrictEqual(await answers(), ['びんた', 'びんたが いたか']);
+      await until(() => rowsOf(who.id).length === 4, '直した回答の保存', 20000);
+      const r = rowsOf(who.id);
+      assert.strictEqual(r[1][head.indexOf('文節（回答）')], 'びんたが｜いて');
+      assert.strictEqual(r[3][head.indexOf('設問ID')], 'S002');
+      assert.strictEqual(r[3][head.indexOf('文節（回答）')], 'びんたが｜いたか');
+      assert.ok(r[3][head.indexOf('録音1')], '直した回答に録音がついていない');
+      // 「思い出せない」にした問題を直す：はじめは「思い出せない」のまま。「やっぱり回答する」で答えられる
+      await p10.locator('.rv__fix').nth(2).click();
+      await p10.waitForSelector('.card--status');
+      assert.ok(/思い出せない/.test(await p10.locator('.status-line').innerText()));
+      await p10.click('text=やっぱり回答する');
+      await p10.fill('#f-answer', 'め'); await p10.fill('#f-example', 'めが ふとか');
+      await record(p10, 0, 600); await record(p10, 1, 600);
+      await p10.getByRole('button', { name: '保存して一覧にもどる' }).click();
+      await p10.waitForSelector('.page--review');
+      assert.deepStrictEqual(await answers(), ['びんた', 'びんたが いたか', 'め']);
+      await until(() => rowsOf(who.id).length === 5, '答え直した回答の保存', 20000);
+      assert.strictEqual(rowsOf(who.id)[4][head.indexOf('回答の状態')], '回答済');
+      // 書きかけのまま × を押すと確かめる。「一覧にもどる」で、直さずにもどる
+      await p10.locator('.rv__fix').nth(0).click();
+      await p10.waitForSelector('.q__editing');
+      await p10.fill('#f-answer', 'ちがう');
+      await p10.click('.iconbtn[aria-label="一覧にもどる"]');
+      await p10.waitForSelector('.dialog');
+      assert.ok(/一覧にもどりますか？/.test(await p10.locator('.dialog__title').innerText()));
+      await p10.locator('.dialog').getByRole('button', { name: '一覧にもどる', exact: true }).click();
+      await p10.waitForSelector('.page--review');
+      assert.deepStrictEqual(await answers(), ['びんた', 'びんたが いたか', 'め']);
+      // 「これでよい」でクリアの画面へ
+      await p10.getByRole('button', { name: 'これでよい' }).click();
+      await p10.waitForSelector('.clear__title');
+      assert.strictEqual(hash(p10), '#/clear/1');
+      assert.ok(/1歩目[\s\S]*クリア/.test(await p10.locator('.clear__title').innerText()));
+      // 読みこみ直したあと、地図からも一覧を開ける（書いた内容は端末に残っている）
+      await p10.goto(`${site}/#/map`);
+      await p10.reload();
+      await p10.waitForSelector('.board .tile--here');
+      await p10.locator('.tile--done').nth(1).click();
+      assert.ok(/回答を見て、直したいところを直せます/.test(await p10.locator('.dialog').innerText()));
+      await p10.getByRole('button', { name: '回答を見る・直す' }).click();
+      await p10.waitForSelector('.page--review');
+      assert.deepStrictEqual(await answers(), ['びんた', 'びんたが いたか', 'め']);
+      assert.strictEqual(await p10.getByRole('button', { name: 'これでよい' }).count(), 0);
+      await p10.locator('.rv__fix').nth(0).click();
+      await p10.waitForSelector('.q__editing');
+      assert.strictEqual(await p10.inputValue('#f-answer'), 'びんた');
+      await p10.click('.iconbtn[aria-label="一覧にもどる"]');
+      await p10.waitForSelector('.page--review');
+      // 書いた内容が端末に残っていないとき（別の端末で答えた など）：そのことを知らせて、直すときは、はじめから書いてもらう
+      await p10.evaluate(id => { localStorage.removeItem('ks1:given:' + id); }, who.id);
+      await p10.reload();
+      await p10.waitForSelector('.page--review');
+      assert.strictEqual(await p10.locator('.rv__line--none').count(), 3);
+      assert.ok(/書いた内容は、この端末には残っていません/.test(await p10.locator('.rv').nth(0).innerText()));
+      await p10.locator('.rv__fix').nth(0).click();
+      await p10.waitForSelector('.q__editing');
+      assert.ok(/前の答えは、この端末には残っていません/.test(await p10.locator('.q__editing').innerText()));
+      assert.strictEqual(await p10.inputValue('#f-answer'), '');
+      await p10.getByRole('button', { name: '保存して一覧にもどる' }).click();
+      await p10.waitForSelector('.page--review');
+      await p10.getByRole('button', { name: '地図にもどる' }).last().click();
+      await p10.waitForSelector('.board .tile--here');
+      await p10.waitForTimeout(500);
+      assert.strictEqual(rowsOf(who.id).length, 5, '見ただけで行が増えた');
+      // 歩きおえていない歩の一覧や「直す」のアドレスを開いても、その歩の問題か地図になる
+      await p10.goto(`${site}/#/step/2/fix/1`);
+      await p10.waitForSelector('.board .tile--here');
+      assert.strictEqual(hash(p10), '#/map');
+    } finally {
+      await ctx.close();
+      test.page = page;
+    }
+  });
+  await test('補足質問のある問題を直す：前に選んだ答えが選ばれている。選び直すと、録音し直して新しい行になる', async () => {
+    const sh = world.ss.getSheetByName('項目');
+    sh.appendRow([1, 0.3, 'X012', '例文', '私が倒れた。', '「そのあと、どうなったっけ？」と聞かれました。 補足質問：「私が」の「が」のところには、どれを使いますか？｜「が」を使う｜「の」（または「ん」）を使う｜どちらも使える', '', '私が｜倒れた', '', true, '', '']);
+    const rowNo = sh.getLastRow();
+    world.call('addParticipants', 1);
+    const last = world.sheetRows('参加者').slice(-1)[0];
+    const who = { id: last[0], pw: last[1] };
+    const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, permissions: ['microphone'], locale: 'ja-JP' });
+    const p11 = await prepare(await ctx.newPage());
+    test.page = p11;
+    const head = world.sheetRows('回答')[0];
+    try {
+      await login(p11, who);
+      await p11.waitForSelector('.board .tile--here');
+      await practice(p11);
+      await openStep(p11);
+      await p11.waitForSelector('.card--follow');
+      await p11.fill('#f-seg-0', 'おいが'); await p11.fill('#f-seg-1', 'たおれた');
+      await record(p11, 0, 700);
+      await p11.locator('.card--follow .choice__opt', { hasText: '「が」を使う' }).click();
+      await p11.getByRole('button', { name: 'つぎへ', exact: true }).click();
+      await p11.waitForSelector('#f-answer');
+      await p11.getByRole('button', { name: 'ひとつ前の問題にもどる' }).click();
+      await p11.waitForSelector('.q__editing');
+      assert.strictEqual(await p11.inputValue('#f-seg-0'), 'おいが');
+      assert.strictEqual(await p11.locator('.card--follow .choice__input:checked').count(), 1);
+      assert.strictEqual(await p11.locator('.card--follow .choice__input:checked').inputValue(), '「が」を使う');
+      await p11.locator('.card--follow .choice__opt', { hasText: 'どちらも使える' }).click();
+      await p11.getByRole('button', { name: 'つぎへ', exact: true }).click();
+      await p11.waitForFunction(() => /録音がまだです/.test(document.querySelector('.form-error').textContent));
+      await record(p11, 0, 700);
+      await p11.getByRole('button', { name: 'つぎへ', exact: true }).click();
+      await p11.waitForSelector('#f-answer');
+      await until(() => rowsOf(who.id).length === 2, '直した回答の保存', 20000);
+      const r = rowsOf(who.id);
+      assert.strictEqual(r[0][head.indexOf('別形・意味・補足')], '［補足質問：「が」を使う］');
+      assert.strictEqual(r[1][head.indexOf('別形・意味・補足')], '［補足質問：どちらも使える］');
+      assert.strictEqual(r[1][head.indexOf('文節（回答）')], 'おいが｜たおれた');
     } finally {
       sh.getRange(rowNo, 1, 1, 12).setValues([['', '', '', '', '', '', '', '', '', '', '', '']]);
       await ctx.close();

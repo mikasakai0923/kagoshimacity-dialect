@@ -412,9 +412,9 @@
       if (info.complete) {
         KS.dialog({
           title: title, sheet: true,
-          body: 'この歩は歩きおわりました。答えを直したいときは、もう一度こたえることができます（前の回答も残ります）。',
-          actions: [{ label: 'とじる', value: 0 }, { label: 'もう一度こたえる', value: 1, kind: 'primary' }]
-        }).then(function (v) { if (v === 1) app.go('#/step/' + s.no + '/redo'); });
+          body: 'この歩は歩きおわりました。回答を見て、直したいところを直せます。',
+          actions: [{ label: 'とじる', value: 0 }, { label: '回答を見る・直す', value: 1, kind: 'primary' }]
+        }).then(function (v) { if (v === 1) app.go('#/step/' + s.no + '/review'); });
         return;
       }
       var started = info.done > 0;
@@ -493,6 +493,7 @@
         h('li', { text: '親しい人と話すときの、自然な方言で答えてください。' }),
         h('li', { text: '回答はひらがなで書き、マイクのボタンで声を録音します。' }),
         h('li', { text: '知らない・使わない・思い出せないときは、そのことを選んで次へ進めます。' }),
+        h('li', { text: '答えを直したいときは、問題の下の「ひとつ前の問題にもどる」を押すか、歩きおえた歩のマスを押して「回答を見る・直す」をえらびます。' }),
         h('li', { text: 'とちゅうでやめても、次に開いたときにつづきから始められます。' })));
     return KS.dialog({ title: '使い方', body: body, actions: [{ label: 'とじる', value: 1, kind: 'primary' }] });
   }
@@ -620,14 +621,22 @@
    * ============================================================ */
   var KANA_WARN = 'ひらがなで書いてください（漢字やローマ字が入っているようです）。';
 
-  S.step = function (stepNo, redo) {
+  // redo：この歩を、はじめから全部答え直す／fixNo：この歩の fixNo 番目の1問だけを直す（回答の一覧の「直す」から）
+  S.step = function (stepNo, redo, fixNo) {
     var app = KS.app, state = KS.state;
     var set = (state.survey && state.survey.settings) || {};
     var step = app.stepByNo(stepNo);
     var all = app.stepItems(stepNo);
-    var list = redo ? all.slice() : all.filter(function (it) { return !app.isDone(it.id); });
+    var fixItem = fixNo ? (all[fixNo - 1] || null) : null;
+    var reviewHash = '#/step/' + stepNo + '/review';
+    var list = fixItem ? [fixItem] : (redo ? all.slice() : all.filter(function (it) { return !app.isDone(it.id); }));
     var doneBefore = all.length - list.length;
     var index = 0;
+    var detour = null;      // 「ひとつ前の問題にもどる」で、もう答えた問題を見ているとき：all の中の場所（見ていなければ null）
+    var editing = false;    // いま出ている問題は、もう答えてある（直すための画面）
+    var pre = null;         // いま出ている問題の、前の答え（この端末に残っていれば）
+    var preStatus = '回答済';
+    var readForm = null;    // いまの画面に書いてある内容を読む
     var recs = [];
     var shownAt = 0;
     var draft = null;
@@ -641,15 +650,30 @@
     var body = h('div', { class: 'q' });
     var el = h('main', { class: 'page page--step' },
       h('div', { class: 'topbar topbar--sticky' },
-        iconButton(KS.icons.close, '地図にもどる', leave),
+        iconButton(KS.icons.close, fixItem ? '一覧にもどる' : '地図にもどる', leave),
         h('div', { class: 'progress', role: 'progressbar', 'aria-valuemin': '0', 'aria-valuemax': String(all.length) }, bar),
         count),
       body);
 
     function destroyRecs() { recs.forEach(function (r) { r.destroy(); }); recs = []; }
 
+    function currentItem() { return fixItem || (detour !== null ? all[detour] : list[index]); }
+    // 答えの内容を、くらべるための形にする（文節の、うしろの空欄は数えない）
+    function snapKey(sn) {
+      sn = sn || {};
+      return JSON.stringify([sn.status || '回答済', sn.answer || '', sn.example || '', (sn.segs || []).join('｜').replace(/｜+$/, ''),
+        sn.note || '', sn.choice || '', sn.follow || '', sn.followText || '']);
+    }
+    // 直すための画面で、前の答えから何か変えたか（録音し直しただけでも「変えた」）
+    function isDirty() {
+      if (recs.some(function (r) { return r.getValue() || r.isBusy(); })) return true;
+      if (!readForm) return false;
+      return snapKey(readForm()) !== snapKey(pre || { status: preStatus });
+    }
+
     function hasContent() {
       if (!draft) return false;
+      if (editing) return isDirty();
       if (draft.status !== '回答済') return true;
       var any = false;
       body.querySelectorAll('input[type="text"], textarea').forEach(function (i) { if (KS.clean(i.value)) any = true; });
@@ -658,12 +682,46 @@
     }
 
     function leave() {
-      if (!hasContent()) { app.replace('#/map'); return; }
+      var to = fixItem ? reviewHash : '#/map';
+      if (!hasContent()) { app.replace(to); return; }
       KS.dialog({
-        title: '地図にもどりますか？',
-        body: 'この問題に書いた内容や録音は消えます。これまでに答えた問題は保存されています。',
-        actions: [{ label: 'つづける', value: 0, kind: 'primary' }, { label: '地図にもどる', value: 1 }]
-      }).then(function (v) { if (v === 1) { draft = null; app.replace('#/map'); } });
+        title: fixItem ? '一覧にもどりますか？' : '地図にもどりますか？',
+        body: editing ? 'この問題で直した内容や録音は、保存されません。前の答えは、そのまま残ります。'
+                      : 'この問題に書いた内容や録音は消えます。これまでに答えた問題は保存されています。',
+        actions: [{ label: 'つづける', value: 0, kind: 'primary' }, { label: fixItem ? '一覧にもどる' : '地図にもどる', value: 1 }]
+      }).then(function (v) { if (v === 1) { draft = null; app.replace(to); } });
+    }
+
+    // ひとつ前の問題にもどる（もう答えた問題を、直すための画面で開く）
+    function goBack() {
+      if (busy || fixItem) return;
+      var p = all.indexOf(currentItem()) - 1;
+      if (p < 0) return;
+      function back() { KS.rec.stopAll(); detour = p; render(); }
+      if (!hasContent()) { back(); return; }
+      KS.dialog({
+        title: 'ひとつ前の問題にもどりますか？',
+        body: editing ? 'この問題で直した内容や録音は、保存されません。前の答えは、そのまま残ります。'
+                      : 'この問題に書いた内容や録音は消えます。もどってきたときに、もう一度書いてください。',
+        actions: [{ label: 'つづける', value: 0, kind: 'primary' }, { label: 'もどる', value: 1 }]
+      }).then(function (v) { if (v === 1 && !destroyed) back(); });
+    }
+
+    // 次の画面へ（回答を保存したあと。直すための画面で何も変えなかったときは、保存せずにここへ来る）
+    function advance() {
+      if (fixItem) { draft = null; destroyRecs(); app.replace(reviewHash); return; }
+      if (detour !== null) {
+        detour++;
+        if (detour >= all.length || all[detour] === list[index]) detour = null;     // もとの問題までもどってきた
+        render();
+        return;
+      }
+      index++;
+      if (index < list.length) { render(); return; }
+      destroyRecs();
+      draft = null;
+      if (redo) { KS.toast('もう一度こたえた内容を保存しました。'); app.replace('#/map'); }
+      else { app.setFresh(stepNo); app.replace(reviewHash); }       // 歩きおえたら、まず回答の一覧で確かめてもらう
     }
 
     function questionLine(item) {
@@ -825,12 +883,16 @@
       clearError();
       showWait('');
       busy = false;
-      var item = list[index];
-      var pos = redo ? index : doneBefore + index;
+      var item = currentItem();
+      editing = !!fixItem || detour !== null;
+      pre = editing ? app.given(item.id) : null;
+      preStatus = (editing && state.progress[item.id] && KS.STATUSES.indexOf(state.progress[item.id].status) >= 0) ? state.progress[item.id].status : '回答済';
+      var pos = editing ? Math.max(0, all.indexOf(item)) : (redo ? index : doneBefore + index);
       bar.style.width = Math.round((pos / all.length) * 100) + '%';
       bar.parentNode.setAttribute('aria-valuenow', String(pos));
       count.textContent = (pos + 1) + ' / ' + all.length;
       draft = { status: '回答済' };
+      if (editing) draft.status = (pre && KS.STATUSES.indexOf(pre.status) >= 0) ? pre.status : preStatus;
       shownAt = Date.now();
 
       body.innerHTML = '';
@@ -850,10 +912,38 @@
         ctx = h('p', { class: 'q__context' }, /^読み/.test(ctxText) ? null : h('span', { class: 'tag', text: '場面' }), KS.ruby(ctxText));
       }
 
+      if (pre) {
+        if (pre.choice && isChoice && KS.choiceOptions(KS.choiceCandidates(item).length).some(function (o) { return o.value === pre.choice; })) draft.choice = pre.choice;
+        if (pre.follow && follow && follow.options.indexOf(pre.follow) >= 0) draft.follow = pre.follow;
+        if (pre.followText && follow && follow.options.length < 2) draft.followText = pre.followText;
+      }
+
       var formWrap = h('div', { class: 'q__form' });
       var statusWrap = h('div', { class: 'q__status' });
       var fields = {};
       lockTargets = [formWrap, statusWrap];
+
+      readForm = function () {
+        var o = { status: draft.status, answer: '', example: '', segs: [], note: val(fields.note), choice: '', follow: '', followText: '' };
+        if (draft.status !== '回答済') return o;
+        if (fields.answer) o.answer = val(fields.answer);
+        if (fields.example) o.example = val(fields.example);
+        if (fields.segs) o.segs = fields.segs.map(function (i) { return KS.clean(i.value).replace(/[｜|]/g, ' ').trim(); });
+        if (fields.choice) o.choice = draft.choice || '';
+        if (fields.follow) o.follow = draft.follow || '';
+        if (fields.followText) o.followText = val(fields.followText);
+        return o;
+      };
+      // 直すための画面：前の答えを、欄に入れておく（録音は入らないので、直すときは録音し直してもらう）
+      function prefill() {
+        if (!pre) return;
+        if (draft.status !== (pre.status || '回答済')) return;       // 「知らない」などを選び直したときは、入れない
+        if (fields.note && pre.note) fields.note.input.value = pre.note;
+        if (draft.status !== '回答済') return;
+        if (fields.answer && pre.answer) fields.answer.input.value = pre.answer;
+        if (fields.example && pre.example) fields.example.input.value = pre.example;
+        if (fields.segs && pre.segs) fields.segs.forEach(function (inp, i) { if (pre.segs[i]) inp.value = pre.segs[i]; });
+      }
 
       // 補足質問：回答と録音のあとに出す。選択肢があれば1つ選んでもらい、なければ文字で答えてもらう（文字のときは、書かなくても進める）
       function followCard() {
@@ -879,6 +969,10 @@
       }
 
       function buildForm() {
+        buildFields();
+        if (editing) prefill();
+      }
+      function buildFields() {
         formWrap.innerHTML = '';
         recBlocks = [];
         fields = {};
@@ -974,7 +1068,7 @@
             { label: 'やめる', value: null, kind: 'primary' }
           ]
         }).then(function (v) {
-          if (!v || destroyed || list[index] !== item) return;
+          if (!v || destroyed || currentItem() !== item) return;
           draft.status = v;
           destroyRecs();
           buildForm();
@@ -994,9 +1088,20 @@
       }
 
       var nextBtn = h('button', { type: 'button', class: 'btn btn--primary btn--big', onclick: function () { next(item, fields, nextBtn, follow); } },
-        index === list.length - 1 ? 'この歩をおえる' : 'つぎへ');
+        fixItem ? '保存して一覧にもどる' : ((detour === null && index === list.length - 1) ? 'この歩をおえる' : 'つぎへ'));
+      // ひとつ前の問題にもどる（この歩の1問目と、1問だけ直す画面では出さない）
+      var backBtn = (!fixItem && all.indexOf(item) > 0)
+        ? h('button', { type: 'button', class: 'btn btn--plain q__back', onclick: goBack }, 'ひとつ前の問題にもどる') : null;
 
       body.appendChild(say('listen', h('p', { text: set.instruction || '' }), true));
+      if (editing) {
+        var how = fixItem ? '直さないときは、そのまま下のボタンを押してください。' : '直さないときは、そのまま「つぎへ」を押してください。';
+        body.appendChild(h('p', { class: 'notice notice--quiet q__editing' },
+          h('span', { class: 'notice__icon', svg: KS.icons.pencil }),
+          h('span', {}, h('strong', { text: 'この問題は、もう答えてあります。' }),
+            pre ? '直すときは、書きなおして、録音もしなおしてください。' + how
+                : '前の答えは、この端末には残っていません。直すときは、はじめから書いて、録音もしてください。' + how)));
+      }
       if (pic) body.appendChild(h('div', { class: 'q__pic' }, pic));
       if (isScene && ctx) body.appendChild(ctx);
       body.appendChild(questionLine(item));
@@ -1011,7 +1116,7 @@
       }
       body.appendChild(errorEl);
       body.appendChild(waitEl);
-      body.appendChild(h('div', { class: 'q__next' }, nextBtn));
+      body.appendChild(h('div', { class: 'q__next' }, nextBtn, backBtn));
 
       buildForm();
       redrawRecorders();
@@ -1033,6 +1138,12 @@
     function next(item, fields, nextBtn, follow) {
       if (busy) return;
       clearError();
+      // 直すための画面で、何も変えていないとき：保存せずに先へ進む（同じ答えの行を、もう1つ増やさない）
+      if (editing && !isDirty()) {
+        if (fixItem) KS.toast('変えたところがないので、そのままにしました。');
+        advance();
+        return;
+      }
       var isChoice = item.type === '選択';
       var isWord = item.type === '語彙' || item.type === '場面' || isChoice;     // 回答の欄が1つの設問
       var answered = draft.status === '回答済';
@@ -1102,7 +1213,7 @@
             actions: [{ label: 'もどって書く', value: 0 }, { label: 'このまま進む', value: 1, kind: 'primary' }]
           }).then(function (v2) {
             busy = false;
-            if (destroyed || list[index] !== item) return;
+            if (destroyed || currentItem() !== item) return;
             if (v2 === 1) commit(item, out, nextBtn);
             else { var first = fields.segs.filter(function (i) { return !KS.clean(i.value); })[0]; if (first) first.focus(); }
           });
@@ -1117,6 +1228,8 @@
       nextBtn.disabled = true;
       var label = nextBtn.textContent;
       out.elapsedSec = Math.round((Date.now() - shownAt) / 100) / 10;
+      out.snap = readForm ? readForm() : null;       // 文字の内容を、端末にも残す（歩のおわりの一覧と、直すときのため）
+      var wasEditing = editing;
       KS.rec.stopAll();
       app.submit(item, out, {
         // ↓ この2つは、端末に回答をとっておけなかったときだけ呼ばれる（保存先に届くまで、この問題で待つ）
@@ -1132,12 +1245,8 @@
       }).then(function () {
         if (destroyed) return;
         showWait('');
-        index++;
-        if (index < list.length) { render(); return; }
-        destroyRecs();
-        draft = null;
-        if (redo) { KS.toast('もう一度こたえた内容を保存しました。'); app.replace('#/map'); }
-        else app.replace('#/clear/' + stepNo);
+        if (wasEditing) KS.toast('直した内容を保存しました。');
+        advance();
       }, function (err) {
         if (destroyed) return;
         busy = false;
@@ -1167,6 +1276,71 @@
       guard: function () { return hasContent(); },
       destroy: function () { destroyed = true; destroyRecs(); KS.rec.stopAll(); }
     };
+  };
+
+  /* ============================================================
+   * 歩の回答の一覧（歩きおえたときと、地図で歩きおえた歩を押したとき）
+   * 回答は、1問ごとにもう保存してある。ここでは、書いた内容を見て、直したい問題だけを開き直せる。
+   * ============================================================ */
+  S.review = function (stepNo) {
+    var app = KS.app, state = KS.state;
+    var step = app.stepByNo(stepNo);
+    var all = app.stepItems(stepNo);
+    var fresh = app.isFresh(stepNo);          // いま歩きおえたところ：「これでよい」でクリアの画面へ
+    var pill = syncPill();
+    var name = stepNo + '歩目' + (step && step.title ? '　' + step.title : '');
+
+    function line(cls, label, text) {
+      return h('p', { class: 'rv__line ' + cls }, label ? h('span', { class: 'rv__label', text: label }) : null, h('span', { class: 'rv__text', text: text }));
+    }
+    function row(item, i) {
+      var g = app.given(item.id);
+      var prog = state.progress[item.id] || {};
+      var status = (g && g.status) || prog.status || '回答済';
+      var fu = KS.followUp(item.context);
+      var hidden = item.type === '場面' || item.type === '選択';       // 提示語・例文を見せない設問は、場面を見出しにする
+      var head = h('p', { class: 'rv__q' }, h('span', { class: 'rv__no', text: String(i + 1) }),
+        h('span', { class: 'rv__prompt' }, KS.ruby(hidden ? fu.context : item.prompt)));
+      var lines = [];
+      if (status !== '回答済') {
+        lines.push(line('rv__line--status', '', '「' + status + '」として記録'));
+        if (g && g.note) lines.push(line('', 'メモ', g.note));
+      } else if (!g) {
+        lines.push(line('rv__line--none', '', '答えてあります（書いた内容は、この端末には残っていません）'));
+      } else {
+        var ans = g.segs && g.segs.length ? g.segs.filter(Boolean).join(' ') : (g.answer || '');
+        if (g.choice) {
+          var opt = KS.choiceOptions(KS.choiceCandidates(item).length).filter(function (o) { return o.value === g.choice; })[0];
+          lines.push(line('', 'えらんだ答え', opt ? opt.label : g.choice));
+        }
+        lines.push(line('rv__line--answer', '', ans || '（文字の回答なし）'));
+        if (g.example) lines.push(line('', '例文', g.example));
+        if (g.follow || g.followText) lines.push(line('', 'もう1つ', KS.plain(g.follow || g.followText)));
+        if (g.note) lines.push(line('', 'ほかに', g.note));
+      }
+      return h('li', { class: 'rv' }, head, h('div', { class: 'rv__body' }, lines),
+        h('button', { type: 'button', class: 'chip rv__fix', 'aria-label': (i + 1) + '問目を直す',
+          onclick: function () { app.replace('#/step/' + stepNo + '/fix/' + (i + 1)); } },
+          h('span', { class: 'chip__icon', svg: KS.icons.pencil }), h('span', { text: '直す' })));
+    }
+
+    var el = h('main', { class: 'page page--review' },
+      h('div', { class: 'topbar' },
+        fresh ? null : iconButton(KS.icons.back, '地図にもどる', function () { app.replace('#/map'); }),
+        h('span', { class: 'topbar__spacer' }), pill.el),
+      h('h1', { class: 'rv__title', text: name + 'の回答' }),
+      say('listen', h('p', { text: fresh
+        ? 'この歩で答えた内容です。直したいところがあれば「直す」を押してください。よければ、いちばん下の「これでよい」を押してください。'
+        : 'この歩で答えた内容です。直したいところがあれば「直す」を押してください。' }), true),
+      h('ol', { class: 'rvlist' }, all.map(row)),
+      h('p', { class: 'hint', text: '録音は、ここでは聞けません。直した問題は、録音もしなおします（前の回答も、調査の記録には残ります）。' }),
+      h('div', { class: 'btn-col rv__foot' },
+        fresh
+          ? h('button', { type: 'button', class: 'btn btn--primary btn--big', onclick: function () { app.clearFresh(stepNo); app.replace('#/clear/' + stepNo); } }, 'これでよい')
+          : h('button', { type: 'button', class: 'btn btn--primary btn--big', onclick: function () { app.replace('#/map'); } }, '地図にもどる'),
+        fresh ? null : h('button', { type: 'button', class: 'linkbtn rv__redo', onclick: function () { app.go('#/step/' + stepNo + '/redo'); } }, 'この歩を、はじめから全部こたえ直す'))
+    );
+    return { el: el, title: name + 'の回答', destroy: function () { pill.destroy(); } };
   };
 
   /* ============================================================
