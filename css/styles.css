@@ -284,6 +284,12 @@ h1:focus, h1:focus-visible { outline: none; }
 .choice__opt:has(.choice__input:checked) { background: var(--bay-pale); box-shadow: 0 3px 0 var(--ink); }
 .choice__opt:has(.choice__input:focus-visible) { outline: 3px solid var(--bay-deep); outline-offset: 2px; }
 .choice--missing .choice__opt { border-color: var(--rec); background: var(--rec-pale); }
+/* 補足質問（回答と録音のあとに出す、もう1つの質問） */
+.card--follow { background: var(--sun-pale); }
+.follow__q { font-size: 18px; line-height: 1.6; margin-bottom: 12px; }
+.follow__q .tag { vertical-align: 0.15em; margin-right: 8px; }
+.follow__q-text { overflow-wrap: anywhere; }
+.choice__label { min-width: 0; overflow-wrap: anywhere; }
 
 /* ---------- 紹介ページ ---------- */
 .intro { padding-top: 12px; }

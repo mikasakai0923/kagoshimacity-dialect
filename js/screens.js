@@ -839,17 +839,44 @@
       var isWord = item.type === '語彙' || item.type === '場面';
       var pic = scene(item.art);
       var ctx = null;
+      // 「場面・意味・読み」の欄に「補足質問：…」が書いてあれば、そこから先は場面として見せず、回答のあとの質問にする
+      var fu = KS.followUp(item.context);
+      var ctxText = fu.context;
+      var follow = fu.follow;
       if (isScene) {
         // 場面の設問：場面を大きく見せる（提示語・例文は参加者には見せない）
-        ctx = h('p', { class: 'q__scene' }, h('span', { class: 'tag', text: '場面' }), h('span', { class: 'q__scene-text' }, KS.ruby(item.context || '')));
-      } else if (item.context) {
-        ctx = h('p', { class: 'q__context' }, /^読み/.test(item.context) ? null : h('span', { class: 'tag', text: '場面' }), KS.ruby(item.context));
+        if (ctxText) ctx = h('p', { class: 'q__scene' }, h('span', { class: 'tag', text: '場面' }), h('span', { class: 'q__scene-text' }, KS.ruby(ctxText)));
+      } else if (ctxText) {
+        ctx = h('p', { class: 'q__context' }, /^読み/.test(ctxText) ? null : h('span', { class: 'tag', text: '場面' }), KS.ruby(ctxText));
       }
 
       var formWrap = h('div', { class: 'q__form' });
       var statusWrap = h('div', { class: 'q__status' });
       var fields = {};
       lockTargets = [formWrap, statusWrap];
+
+      // 補足質問：回答と録音のあとに出す。選択肢があれば1つ選んでもらい、なければ文字で答えてもらう（文字のときは、書かなくても進める）
+      function followCard() {
+        if (!follow) return null;
+        var head = h('p', { class: 'label follow__q', id: 'follow-label' }, h('span', { class: 'tag', text: 'もう1つ' }), h('span', { class: 'follow__q-text' }, KS.ruby(follow.question)));
+        if (follow.options.length < 2) {
+          fields.followText = kanaField('f-follow-text', '答え', { optional: true, free: true, multiline: true });
+          if (draft.followText) fields.followText.input.value = draft.followText;
+          fields.followText.input.setAttribute('aria-labelledby', 'follow-label');
+          fields.followText.input.addEventListener('input', function () { draft.followText = fields.followText.input.value; });
+          return h('div', { class: 'card card--follow' }, head, fields.followText.el);
+        }
+        var group = h('div', { class: 'choice', role: 'radiogroup', 'aria-labelledby': 'follow-label' });
+        fields.follow = { group: group, inputs: [] };
+        follow.options.forEach(function (label, i) {
+          var id = 'f-follow-' + i;
+          var input = h('input', { type: 'radio', class: 'choice__input', name: 'f-follow', id: id, value: label, checked: draft.follow === label ? true : null });
+          input.addEventListener('change', function () { if (input.checked) { draft.follow = label; group.classList.remove('choice--missing'); clearError(); } });
+          fields.follow.inputs.push(input);
+          group.appendChild(h('label', { class: 'choice__opt', for: id }, input, h('span', { class: 'choice__label' }, KS.ruby(label))));
+        });
+        return h('div', { class: 'card card--follow' }, head, group);
+      }
 
       function buildForm() {
         formWrap.innerHTML = '';
@@ -932,6 +959,8 @@
           formWrap.appendChild(h('div', { class: 'card' }, fields.note.el));
           formWrap.appendChild(h('div', { class: 'card' }, h('p', { class: 'label', text: recLabel }), rb3.el));
         }
+        var fc = followCard();
+        if (fc) formWrap.appendChild(fc);
       }
 
       function pickStatus() {
@@ -964,7 +993,7 @@
         }
       }
 
-      var nextBtn = h('button', { type: 'button', class: 'btn btn--primary btn--big', onclick: function () { next(item, fields, nextBtn); } },
+      var nextBtn = h('button', { type: 'button', class: 'btn btn--primary btn--big', onclick: function () { next(item, fields, nextBtn, follow); } },
         index === list.length - 1 ? 'この歩をおえる' : 'つぎへ');
 
       body.appendChild(say('listen', h('p', { text: set.instruction || '' }), true));
@@ -1001,7 +1030,7 @@
       if (errorEl.scrollIntoView) { try { errorEl.scrollIntoView({ block: 'nearest' }); } catch (e) { /* 何もしない */ } }
     }
 
-    function next(item, fields, nextBtn) {
+    function next(item, fields, nextBtn, follow) {
       if (busy) return;
       clearError();
       var isChoice = item.type === '選択';
@@ -1050,6 +1079,20 @@
           }
         } else {
           out.noAudioReason = 'マイクが使えない';
+        }
+        // 補足質問の答えは、「別形・意味・補足」の欄の先頭に［補足質問：答え］の形で入れる
+        if (follow) {
+          var followAnswer = '';
+          if (fields.follow) {
+            if (!draft.follow) {
+              fields.follow.group.classList.add('choice--missing');
+              return fail('さいごの質問で、あてはまるものを1つ選んでください。', fields.follow.inputs[0]);
+            }
+            followAnswer = draft.follow;
+          } else if (fields.followText) {
+            followAnswer = val(fields.followText);
+          }
+          out.note = KS.followNote(followAnswer, out.note);
         }
         if (!isWord && emptyCells > 0 && emptyCells < fields.segs.length) {
           busy = true;

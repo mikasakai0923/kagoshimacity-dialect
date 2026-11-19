@@ -79,6 +79,28 @@
     }
     return [{ label: '言える', value: '○' }, { label: '言えない', value: '×' }];
   };
+  // 補足質問：「場面・意味・読み」の欄の、場面のあとに「補足質問：質問｜選択肢1｜選択肢2」と書くと、
+  // 回答と録音のあとに、その質問を出す（選択肢が2つ以上なら1つ選んでもらう。選択肢がなければ、文字で答えてもらう）。
+  // 返すもの：{ context: 参加者に見せる場面（補足質問の部分を除いたもの）, follow: { question, options } か null }
+  KS.FOLLOW_MAX_OPTIONS = 6;
+  KS.followUp = function (context) {
+    var s = String(context == null ? '' : context);
+    var m = /補足質問\s*[：:]/.exec(s);
+    if (!m) return { context: s.trim(), follow: null };
+    var parts = s.slice(m.index + m[0].length).split(/[｜|]/).map(function (t) { return t.replace(/\s+/g, ' ').trim(); });
+    var question = parts[0] || '';
+    var options = parts.slice(1).filter(Boolean).slice(0, KS.FOLLOW_MAX_OPTIONS);
+    var rest = s.slice(0, m.index).trim();
+    if (!question && !options.length) return { context: rest, follow: null };
+    return { context: rest, follow: { question: question || 'あてはまるものを教えてください。', options: options } };
+  };
+  // 補足質問の答えは、「別形・意味・補足」の欄の先頭に、この形で入れる（そのあとに、参加者が書いた補足がつづく）
+  KS.followNote = function (answer, note) {
+    var a = KS.plain(answer).replace(/[［］]/g, '').replace(/\s+/g, ' ').trim();
+    var n = String(note == null ? '' : note);
+    if (!a) return n;
+    return '［補足質問：' + a + '］' + (n ? ' ' + n : '');
+  };
   // SVG の文字として入れるときの逃がし（& < > " '）
   KS.escapeHtml = function (text) {
     return String(text == null ? '' : text).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; });

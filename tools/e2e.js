@@ -1068,6 +1068,109 @@ const PNG_1PX = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUl
     }
   });
 
+  console.log('補足質問');
+  await test('補足質問：場面のあとに「補足質問：質問｜選択肢…」と書くと、回答と録音のあとで選んでもらう。答えは「別形・意味・補足」の先頭に入る', async () => {
+    const sh = world.ss.getSheetByName('項目');
+    sh.appendRow([1, 0.3, 'X009', '例文', '私が倒《たお》れた。', '「そのあと、どうなったっけ？」と聞かれました。 補足質問：「私が」の「が」のところには、どれを使いますか？｜「が」を使う｜「の」（または「ん」）を使う｜「が」も「の」（または「ん」）も、どちらも使える', '', '私が｜倒《たお》れた', '', true, '', '']);
+    sh.appendRow([1, 0.35, 'X010', '語彙', '体', '補足質問：ほかの言い方も、あれば教えてください。', '', '', '', true, '', '']);
+    const rowNo = sh.getLastRow() - 1;
+    world.call('addParticipants', 1);
+    const last = world.sheetRows('参加者').slice(-1)[0];
+    const who = { id: last[0], pw: last[1] };
+    const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, permissions: ['microphone'], locale: 'ja-JP' });
+    const p7 = await prepare(await ctx.newPage());
+    test.page = p7;
+    try {
+      await login(p7, who);
+      await p7.waitForSelector('.board .tile--here');
+      await practice(p7);
+      await openStep(p7);
+      await p7.waitForSelector('.card--follow');
+      // 場面には、補足質問の部分は出ない。補足質問は、録音のあと（いちばん下の面）に出る
+      const ctxText = await p7.locator('.q__context').innerText();
+      assert.ok(/どうなったっけ？」と聞かれました。$/.test(ctxText.trim()), ctxText);
+      assert.ok(!/補足質問|使いますか/.test(ctxText), '場面に補足質問が出ている');
+      assert.ok(/「私が」の「が」のところには、どれを使いますか？/.test(await p7.locator('.follow__q').innerText()));
+      assert.deepStrictEqual((await p7.locator('.card--follow .choice__opt').allInnerTexts()).map(t => t.trim()),
+        ['「が」を使う', '「の」（または「ん」）を使う', '「が」も「の」（または「ん」）も、どちらも使える']);
+      assert.strictEqual(await p7.evaluate(() => { const c = document.querySelectorAll('.q__form > .card'); return c[c.length - 1].classList.contains('card--follow'); }), true, '補足質問が、いちばん下にない');
+      assert.strictEqual(await p7.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true, '横にはみ出している');
+      if (shots) await p7.screenshot({ path: path.join(shots, 'live-23-follow.png'), fullPage: true });
+      // 選ばずに進もうとすると、止まる
+      await p7.fill('#f-seg-0', 'おいが');
+      await p7.fill('#f-seg-1', 'たおれた');
+      await record(p7, 0, 700);
+      await p7.click('text=つぎへ');
+      await p7.waitForFunction(() => /さいごの質問で、あてはまるものを1つ選んでください/.test(document.querySelector('.form-error').textContent));
+      assert.strictEqual(await p7.locator('.card--follow .choice--missing').count(), 1);
+      await p7.locator('.card--follow .choice__opt', { hasText: '「の」（または「ん」）を使う' }).click();
+      assert.strictEqual(await p7.locator('.card--follow .choice--missing').count(), 0);
+      await p7.fill('#f-note', 'おいの');
+      if (shots) await p7.screenshot({ path: path.join(shots, 'live-24-follow-picked.png'), fullPage: true });
+      await p7.click('text=つぎへ');
+      // 選択肢のない補足質問：文字で答えてもらう（書かなくても進める）。場面がないので、場面の行は出ない
+      await p7.waitForSelector('#f-follow-text');
+      assert.strictEqual(await p7.locator('.q__context').count(), 0, '空の場面が出ている');
+      assert.strictEqual(await p7.locator('.card--follow .choice__opt').count(), 0, '前の設問の選択肢が残っている');
+      assert.ok(/ほかの言い方も、あれば教えてください。/.test(await p7.locator('.follow__q').innerText()));
+      await p7.fill('#f-answer', 'ごて');
+      await record(p7, 0, 700);
+      await p7.fill('#f-follow-text', 'からだ ともいう');
+      await p7.click('text=つぎへ');
+      await p7.waitForFunction(() => /頭/.test((document.querySelector('.q__prompt') || {}).textContent || ''));
+      assert.strictEqual(await p7.locator('.card--follow').count(), 0, '補足質問のない設問に、補足質問が出ている');
+      await until(() => rowsOf(who.id).some(r => r[3] === 'X010'), '補足質問つきの回答が届く', 20000);
+      const head = world.sheetRows('回答')[0];
+      const r = rowsOf(who.id).find(r => r[3] === 'X009');
+      assert.strictEqual(r[head.indexOf('提示語・例文')], '私が倒れた。');
+      assert.strictEqual(r[head.indexOf('文節（回答）')], 'おいが｜たおれた');
+      assert.strictEqual(r[head.indexOf('別形・意味・補足')], '［補足質問：「の」（または「ん」）を使う］ おいの');
+      assert.ok(r[head.indexOf('録音1')], '録音がついていない');
+      const r2 = rowsOf(who.id).find(r => r[3] === 'X010');
+      assert.strictEqual(r2[head.indexOf('回答（地域の言葉）')], 'ごて');
+      assert.strictEqual(r2[head.indexOf('別形・意味・補足')], '［補足質問：からだ ともいう］');
+    } finally {
+      sh.getRange(rowNo, 1, 2, 12).setValues([['', '', '', '', '', '', '', '', '', '', '', ''], ['', '', '', '', '', '', '', '', '', '', '', '']]);
+      await ctx.close();
+      test.page = page;
+    }
+  });
+  await test('補足質問：「知らない」などを選んだときは、補足質問は聞かない', async () => {
+    const sh = world.ss.getSheetByName('項目');
+    sh.appendRow([1, 0.3, 'X011', '例文', '私の体', '補足質問：「おいがごて」のような言い方はできますか？｜できる｜できない', '', '私の｜体', '', true, '', '']);
+    const rowNo = sh.getLastRow();
+    world.call('addParticipants', 1);
+    const last = world.sheetRows('参加者').slice(-1)[0];
+    const who = { id: last[0], pw: last[1] };
+    const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, permissions: ['microphone'], locale: 'ja-JP' });
+    const p8 = await prepare(await ctx.newPage());
+    test.page = p8;
+    try {
+      await login(p8, who);
+      await p8.waitForSelector('.board .tile--here');
+      await practice(p8);
+      await openStep(p8);
+      await p8.waitForSelector('.card--follow');
+      assert.deepStrictEqual((await p8.locator('.card--follow .choice__opt').allInnerTexts()).map(t => t.trim()), ['できる', 'できない']);
+      await p8.locator('.card--follow .choice__opt', { hasText: 'できない' }).click();
+      await p8.click('text=知らない・使わない・思い出せないとき');
+      await p8.click('text=思い出せない（いまは出てこない）');
+      await p8.waitForSelector('.card--status');
+      assert.strictEqual(await p8.locator('.card--follow').count(), 0, '「思い出せない」のときにも、補足質問が出ている');
+      await p8.click('text=つぎへ');
+      await p8.waitForFunction(() => /頭/.test((document.querySelector('.q__prompt') || {}).textContent || ''));
+      await until(() => rowsOf(who.id).some(r => r[3] === 'X011'), '「思い出せない」の回答が届く', 20000);
+      const head = world.sheetRows('回答')[0];
+      const r = rowsOf(who.id).find(r => r[3] === 'X011');
+      assert.strictEqual(r[head.indexOf('回答の状態')], '思い出せない');
+      assert.strictEqual(r[head.indexOf('別形・意味・補足')], '');
+    } finally {
+      sh.getRange(rowNo, 1, 1, 12).setValues([['', '', '', '', '', '', '', '', '', '', '', '']]);
+      await ctx.close();
+      test.page = page;
+    }
+  });
+
   console.log('そのほか');
   await test('保存先への送信は、決まった形（text/plain のPOST）だけ', async () => {
     assert.ok(world.control.calls.length > 10);
