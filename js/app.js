@@ -12,10 +12,12 @@
     session: null,        // { id, token, expiresAt }
     survey: null,         // { settings, steps, items }
     progress: {},         // { 設問ID: { status, at } }
+    given: {},            // { 設問ID: この端末で答えた内容（文字だけ） }。歩のおわりの一覧と、答えを直すときに使う
     practiceDone: false,  // 録音のれんしゅうを終えたか
     volatileMode: false   // 端末に回答をとっておけない状態か（そのあいだは、1問ごとに送信が終わるのを待つ）
   };
   var localMarks = {};    // この画面を開いてから答えた設問（保存先の返事が古くても「答えた」ままにする）
+  var freshSteps = {};    // いま歩きおえたばかりの歩（一覧で確かめてから、クリアの画面へ進む）
   var current = null;     // いま出ている画面
   var currentHash = null; // いま出ている画面のアドレス（#/…）
   var lastRefresh = 0;
@@ -115,6 +117,16 @@
     return 'goal';
   };
 
+  // この端末で答えた内容（文字だけ。録音は入っていない）。別の端末で答えた設問や、前の版で答えた設問は null
+  app.given = function (itemId) {
+    var g = state.given;
+    return (g && has(g, itemId) && g[itemId] && typeof g[itemId] === 'object') ? g[itemId] : null;
+  };
+  // 歩きおえたばかりの歩：一覧で「これでよい」を押すと、クリアの画面へ進む
+  app.setFresh = function (no) { freshSteps[no] = true; };
+  app.isFresh = function (no) { return !!freshSteps[no]; };
+  app.clearFresh = function (no) { delete freshSteps[no]; };
+
   app.setPracticeDone = function () {
     state.practiceDone = true;
     if (state.session) store.set('practice:' + state.session.id + SFX, true);
@@ -136,6 +148,11 @@
       state.progress[item.id] = rec;
       localMarks[item.id] = rec;
       store.set('progress:' + s.id + SFX, state.progress);
+      if (out.snap) {
+        out.snap.at = rec.at;
+        state.given[item.id] = out.snap;
+        store.set('given:' + s.id + SFX, state.given);
+      }
       KS.bus.emit('survey');          // 地図が出ていれば、描き直す
     }
     var sub = {
@@ -182,9 +199,11 @@
     state.session = session;
     state.survey = store.get('survey:' + session.id + SFX, null);
     state.progress = store.get('progress:' + session.id + SFX, {}) || {};
+    state.given = store.get('given:' + session.id + SFX, {}) || {};
     state.practiceDone = !!store.get('practice:' + session.id + SFX, false);
     state.volatileMode = false;
     localMarks = {};
+    freshSteps = {};
     lastRefresh = 0;
   }
 
@@ -209,8 +228,9 @@
   app.logout = function () {
     KS.rec.stopAll();
     store.remove('session' + SFX);
-    state.session = null; state.survey = null; state.progress = {}; state.practiceDone = false; state.volatileMode = false;
+    state.session = null; state.survey = null; state.progress = {}; state.given = {}; state.practiceDone = false; state.volatileMode = false;
     localMarks = {};
+    freshSteps = {};
     KS.sync.reset();
     KS.bus.emit('sync', KS.sync.status());
     app.replace('#/');
@@ -370,6 +390,16 @@
       if (!info) return redirect('#/map');
       if (!state.practiceDone) return redirect('#/practice');
       if (!info.unlocked) return redirect('#/map');
+      // 歩きおえた歩：回答の一覧（#/step/1/review）と、1問だけ直す画面（#/step/1/fix/3）
+      if (route.parts[2] === 'review') {
+        if (!info.complete) return redirect('#/step/' + no);
+        return mount(KS.screens.review(no));
+      }
+      if (route.parts[2] === 'fix') {
+        var fixNo = parseInt(route.parts[3], 10);
+        if (!info.complete || !(fixNo >= 1) || !app.stepItems(no)[fixNo - 1]) return redirect(info.complete ? '#/step/' + no + '/review' : '#/map');
+        return mount(KS.screens.step(no, false, fixNo));
+      }
       var redo = route.parts[2] === 'redo';
       if (redo && !info.complete) redo = false;
       if (!redo && info.complete) return redirect('#/map');       // もう全部答えてある

@@ -284,6 +284,12 @@ h1:focus, h1:focus-visible { outline: none; }
 .choice__opt:has(.choice__input:checked) { background: var(--bay-pale); box-shadow: 0 3px 0 var(--ink); }
 .choice__opt:has(.choice__input:focus-visible) { outline: 3px solid var(--bay-deep); outline-offset: 2px; }
 .choice--missing .choice__opt { border-color: var(--rec); background: var(--rec-pale); }
+/* 補足質問（回答と録音のあとに出す、もう1つの質問） */
+.card--follow { background: var(--sun-pale); }
+.follow__q { font-size: 18px; line-height: 1.6; margin-bottom: 12px; }
+.follow__q .tag { vertical-align: 0.15em; margin-right: 8px; }
+.follow__q-text { overflow-wrap: anywhere; }
+.choice__label { min-width: 0; overflow-wrap: anywhere; }
 
 /* ---------- 紹介ページ ---------- */
 .intro { padding-top: 12px; }
@@ -402,7 +408,26 @@ h1:focus, h1:focus-visible { outline: none; }
 .q__wait .chip { margin-top: 8px; color: var(--ink); }
 .is-locked { opacity: 0.55; pointer-events: none; }
 .q .notice { margin: 16px 0 0; }
-.q__next { margin-top: 22px; }
+.q__next { margin-top: 22px; display: grid; gap: 14px; }
+.q .q__editing { margin: 0 0 16px; }
+.say__text { margin-top: 16px; }
+
+/* ---------- 歩の回答の一覧 ---------- */
+.rv__title { margin: 4px 0 14px; font-family: var(--font-display); font-weight: 400; font-size: 26px; line-height: 1.35; }
+.rvlist { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; }
+.rv { display: grid; grid-template-columns: 1fr auto; gap: 8px 12px; align-items: start; padding: 14px 14px 14px 16px; border: 2px solid var(--ink); border-radius: var(--r-l); background: var(--paper); }
+.rv__q { grid-column: 1 / -1; display: flex; align-items: flex-start; gap: 10px; color: var(--ink-2); font-weight: 700; font-size: 15px; line-height: 1.6; }
+.rv__no { flex: none; display: inline-flex; align-items: center; justify-content: center; min-width: 26px; height: 26px; padding: 0 6px; border-radius: 13px; background: var(--ink); color: #fff; font-size: 14px; line-height: 1; }
+.rv__prompt { min-width: 0; overflow-wrap: anywhere; }
+.rv__prompt rt { font-size: 10px; }
+.rv__body { min-width: 0; display: grid; gap: 4px; }
+.rv__line { font-size: 15px; line-height: 1.6; overflow-wrap: anywhere; }
+.rv__line--answer { font-weight: 700; font-size: 20px; line-height: 1.5; }
+.rv__line--status, .rv__line--none, .rv__line--said { color: var(--ink-2); font-weight: 700; }
+.rv__label { display: inline-block; margin-right: 8px; padding: 0 8px; border-radius: 8px; background: var(--bay-pale); font-size: 13px; font-weight: 700; line-height: 1.8; }
+.rv__fix { align-self: center; }
+.rv__foot { margin-top: 22px; }
+.rv__redo { justify-self: center; }
 
 /* ---------- 録音 ---------- */
 .rec { display: grid; grid-template-columns: auto 1fr; gap: 6px 16px; align-items: center; }
