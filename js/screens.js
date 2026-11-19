@@ -736,10 +736,12 @@
         el2.appendChild(h('span', { class: 'q__rest', text: set.choiceQuestion || 'この場面で言えるのは、どれですか？' }));
         return el2;
       }
-      var tpl = item.type === '語彙' ? (set.wordQuestion || '「{語}」のことをなんといいますか？') : (set.sentenceQuestion || '「{文}」をなんといいますか？');
+      // 発音だけを録る設問（★）：「〜を発音してください。」と聞く
+      var tpl = KS.sayOnly(item) ? '「{語}」を発音してください。'
+        : (item.type === '語彙' ? (set.wordQuestion || '「{語}」のことをなんといいますか？') : (set.sentenceQuestion || '「{文}」をなんといいますか？'));
       var m = /\{(語|文)\}/.exec(tpl);
       if (!m) {
-        el2.appendChild(h('span', { class: 'q__prompt-wrap' }, h('span', { class: 'q__prompt' }, KS.ruby(item.prompt))));
+        el2.appendChild(h('span', { class: 'q__prompt-wrap' }, h('span', { class: 'q__prompt' }, KS.ruby(KS.promptText(item)))));
         el2.appendChild(h('span', { class: 'q__rest', text: tpl }));
         return el2;
       }
@@ -751,7 +753,7 @@
       if (before) el2.appendChild(h('span', { class: 'q__rest', text: before }));
       var p = h('span', { class: 'q__prompt' });
       if (open) p.appendChild(document.createTextNode(open));
-      p.appendChild(KS.ruby(item.prompt));
+      p.appendChild(KS.ruby(KS.promptText(item)));
       if (close) p.appendChild(document.createTextNode(close));
       el2.appendChild(h('span', { class: 'q__prompt-wrap' }, p));
       if (afterText) el2.appendChild(h('span', { class: 'q__rest', text: afterText }));
@@ -853,10 +855,12 @@
     }
     var recBlocks = [];
     var micHelpBtn = null;
+    var onMicChange = null;     // 録音あり・なしが切りかわったときに、いまの問題の画面でやること
     function redrawRecorders() {
       destroyRecs();
       recBlocks.forEach(function (b) { var r = b.draw(); if (r) recs.push(r); });
       if (micHelpBtn) micHelpBtn.style.display = micOff ? 'none' : '';
+      if (onMicChange) onMicChange();
     }
     function showMicHelp() { if (micHelpBtn) micHelpBtn.classList.add('linkbtn--strong'); }
     function askMicOff() {
@@ -899,6 +903,7 @@
       var isChoice = item.type === '選択';
       var isScene = item.type === '場面' || isChoice;          // どちらも、場面を大きく見せて、提示語・例文は見せない
       var isWord = item.type === '語彙' || item.type === '場面';
+      var isSay = KS.sayOnly(item);                             // 発音だけを録る設問（★）：回答を書く欄は出さない
       var pic = scene(item.art);
       var ctx = null;
       // 「場面・意味・読み」の欄に「補足質問：…」が書いてあれば、そこから先は場面として見せず、回答のあとの質問にする
@@ -926,7 +931,7 @@
       readForm = function () {
         var o = { status: draft.status, answer: '', example: '', segs: [], note: val(fields.note), choice: '', follow: '', followText: '' };
         if (draft.status !== '回答済') return o;
-        if (fields.answer) o.answer = val(fields.answer);
+        if (fields.answer && !(isSay && !micOff)) o.answer = val(fields.answer);       // 発音だけの設問では、マイクが使えないときだけ文字を書く
         if (fields.example) o.example = val(fields.example);
         if (fields.segs) o.segs = fields.segs.map(function (i) { return KS.clean(i.value).replace(/[｜|]/g, ' ').trim(); });
         if (fields.choice) o.choice = draft.choice || '';
@@ -976,6 +981,7 @@
         formWrap.innerHTML = '';
         recBlocks = [];
         fields = {};
+        onMicChange = null;
         if (draft.status !== '回答済') {
           formWrap.appendChild(h('div', { class: 'card card--status' },
             h('p', { class: 'status-line' }, '「', h('strong', { text: draft.status }), '」として記録します。'),
@@ -1009,6 +1015,16 @@
           recBlocks.push(rbc);
           formWrap.appendChild(h('div', { class: 'card' }, fields.answer.el, h('p', { class: 'label', text: recLabel }), rbc.el));
           fields.note = kanaField('f-note', '言い方によって意味や感じがちがうときは、教えてください', { optional: true, free: true, multiline: true });
+          formWrap.appendChild(h('div', { class: 'card' }, fields.note.el));
+        } else if (isSay) {
+          // 発音だけを録る設問：録音と備考だけ。マイクが使えないときだけ、ひらがなで書く欄を出す
+          var rbs = recorderBlock('回答', 'main');
+          recBlocks.push(rbs);
+          fields.answer = kanaField('f-answer', 'マイクが使えないので、言い方をひらがなで書いてください');
+          var sayText = h('div', { class: 'say__text' }, fields.answer.el);
+          onMicChange = function () { sayText.style.display = micOff ? '' : 'none'; };
+          formWrap.appendChild(h('div', { class: 'card card--say' }, h('p', { class: 'label', text: recLabel }), rbs.el, sayText));
+          fields.note = kanaField('f-note', '備考（気づいたことがあれば）', { optional: true, free: true, multiline: true });
           formWrap.appendChild(h('div', { class: 'card' }, fields.note.el));
         } else if (isWord) {
           fields.answer = kanaField('f-answer', isScene ? 'あなたの言い方（ひらがなで記入してください）' : '回答（ひらがなで記入してください）');
@@ -1099,8 +1115,9 @@
         body.appendChild(h('p', { class: 'notice notice--quiet q__editing' },
           h('span', { class: 'notice__icon', svg: KS.icons.pencil }),
           h('span', {}, h('strong', { text: 'この問題は、もう答えてあります。' }),
-            pre ? '直すときは、書きなおして、録音もしなおしてください。' + how
-                : '前の答えは、この端末には残っていません。直すときは、はじめから書いて、録音もしてください。' + how)));
+            isSay ? '直すときは、録音しなおしてください。' + how
+              : (pre ? '直すときは、書きなおして、録音もしなおしてください。' + how
+                     : '前の答えは、この端末には残っていません。直すときは、はじめから書いて、録音もしてください。' + how))));
       }
       if (pic) body.appendChild(h('div', { class: 'q__pic' }, pic));
       if (isScene && ctx) body.appendChild(ctx);
@@ -1145,7 +1162,8 @@
         return;
       }
       var isChoice = item.type === '選択';
-      var isWord = item.type === '語彙' || item.type === '場面' || isChoice;     // 回答の欄が1つの設問
+      var isSay = KS.sayOnly(item);                                             // 発音だけを録る設問（★）
+      var isWord = isSay || item.type === '語彙' || item.type === '場面' || isChoice;     // 文節に分けない設問
       var answered = draft.status === '回答済';
       var out = { status: draft.status, answer: '', segPrompt: '', segAnswer: '', exampleAnswer: '', note: val(fields.note), noAudioReason: '', audio: [] };
 
@@ -1158,7 +1176,13 @@
           out.segPrompt = KS.choiceCandidates(item).map(KS.plain).join('｜');
           out.segAnswer = draft.choice;
         }
-        if (isWord) {
+        if (isSay) {
+          // 文字の回答はなし（録音だけ）。マイクが使えないときだけ、ひらがなで書いてもらう
+          if (micOff) {
+            out.answer = val(fields.answer);
+            if (!out.answer) { fields.answer.input.classList.add('field__input--missing'); return fail('マイクが使えないときは、言い方をひらがなで書いてください。', fields.answer.input); }
+          }
+        } else if (isWord) {
           out.answer = val(fields.answer);
           if (!out.answer) { fields.answer.input.classList.add('field__input--missing'); return fail('回答をひらがなで書いてください。', fields.answer.input); }
           if (fields.example) {
@@ -1299,8 +1323,9 @@
       var status = (g && g.status) || prog.status || '回答済';
       var fu = KS.followUp(item.context);
       var hidden = item.type === '場面' || item.type === '選択';       // 提示語・例文を見せない設問は、場面を見出しにする
+      var sayOnly = KS.sayOnly(item);
       var head = h('p', { class: 'rv__q' }, h('span', { class: 'rv__no', text: String(i + 1) }),
-        h('span', { class: 'rv__prompt' }, KS.ruby(hidden ? fu.context : item.prompt)));
+        h('span', { class: 'rv__prompt' }, KS.ruby(hidden ? fu.context : KS.promptText(item))));
       var lines = [];
       if (status !== '回答済') {
         lines.push(line('rv__line--status', '', '「' + status + '」として記録'));
@@ -1313,10 +1338,11 @@
           var opt = KS.choiceOptions(KS.choiceCandidates(item).length).filter(function (o) { return o.value === g.choice; })[0];
           lines.push(line('', 'えらんだ答え', opt ? opt.label : g.choice));
         }
-        lines.push(line('rv__line--answer', '', ans || '（文字の回答なし）'));
+        if (sayOnly && !ans) lines.push(line('rv__line--said', '', '録音しました'));
+        else lines.push(line('rv__line--answer', '', ans || '（文字の回答なし）'));
         if (g.example) lines.push(line('', '例文', g.example));
         if (g.follow || g.followText) lines.push(line('', 'もう1つ', KS.plain(g.follow || g.followText)));
-        if (g.note) lines.push(line('', 'ほかに', g.note));
+        if (g.note) lines.push(line('', sayOnly ? '備考' : 'ほかに', g.note));
       }
       return h('li', { class: 'rv' }, head, h('div', { class: 'rv__body' }, lines),
         h('button', { type: 'button', class: 'chip rv__fix', 'aria-label': (i + 1) + '問目を直す',

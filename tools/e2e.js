@@ -1451,6 +1451,85 @@ const PNG_1PX = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUl
     }
   });
 
+  console.log('発音だけを録る設問');
+  await test('提示語の先頭に ★ を付けた設問：回答を書く欄は出ず、録音と備考だけ。★ は見せない。マイクが使えないときだけ、ひらがなで書く', async () => {
+    const sh = world.ss.getSheetByName('項目');
+    sh.appendRow([1, 0.3, 'X013', '語彙', '★赤信号が青信号に変わった。', '', '', '', 'signal-aka-ao.svg', true, '', '']);
+    sh.appendRow([1, 0.35, 'X014', '語彙', '★釘《くぎ》', '', '', '', '', true, '', '']);
+    const rowNo = sh.getLastRow() - 1;
+    world.call('addParticipants', 1);
+    const last = world.sheetRows('参加者').slice(-1)[0];
+    const who = { id: last[0], pw: last[1] };
+    const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, permissions: ['microphone'], locale: 'ja-JP' });
+    const p12 = await prepare(await ctx.newPage());
+    test.page = p12;
+    const head = world.sheetRows('回答')[0];
+    const nextBtn = () => p12.getByRole('button', { name: 'つぎへ', exact: true });
+    try {
+      await login(p12, who);
+      await p12.waitForSelector('.board .tile--here');
+      await practice(p12);
+      await openStep(p12);
+      await p12.waitForSelector('.card--say');
+      assert.strictEqual((await p12.locator('.q__title').innerText()).replace(/\s+/g, ''), '「赤信号が青信号に変わった。」を発音してください。');
+      assert.ok(!/★/.test(await p12.locator('.page').innerText()), '画面に ★ が出ている');
+      assert.strictEqual(await p12.locator('#f-answer').isVisible(), false, '回答を書く欄が見えている');
+      assert.strictEqual(await p12.locator('.seg__input').count(), 0);
+      assert.ok(/^備考/.test(await p12.locator('label[for="f-note"]').innerText()));
+      await p12.waitForFunction(() => { const i = document.querySelector('.q__pic img'); return i && i.complete && i.naturalWidth > 0; }, null, { timeout: 10000 });
+      assert.strictEqual(await p12.locator('.q__pic img').getAttribute('src'), 'images/signal-aka-ao.svg');
+      assert.strictEqual(await p12.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true, '横にはみ出している');
+      if (shots) await p12.screenshot({ path: path.join(shots, 'live-28-say.png'), fullPage: true });
+      // 録音しないと進めない。録音すれば、文字を書かずに進める
+      await nextBtn().click();
+      await p12.waitForFunction(() => /録音がまだです/.test(document.querySelector('.form-error').textContent));
+      await record(p12, 0, 700);
+      await p12.fill('#f-note', 'しんごうは しんごー');
+      await nextBtn().click();
+      await p12.waitForFunction(() => /釘/.test((document.querySelector('.q__prompt') || {}).textContent || ''));
+      assert.strictEqual(await p12.locator('.q__prompt rt').innerText(), 'くぎ');
+      // もどると、直すための画面になる（書く欄はないまま）。何も変えなければ、行は増えない
+      await p12.getByRole('button', { name: 'ひとつ前の問題にもどる' }).click();
+      await p12.waitForSelector('.q__editing');
+      assert.ok(/直すときは、録音しなおしてください/.test(await p12.locator('.q__editing').innerText()));
+      assert.strictEqual(await p12.inputValue('#f-note'), 'しんごうは しんごー');
+      assert.strictEqual(await p12.locator('#f-answer').isVisible(), false);
+      await nextBtn().click();
+      await p12.waitForFunction(() => /釘/.test((document.querySelector('.q__prompt') || {}).textContent || ''));
+      // マイクが使えないとき：ひらがなで書く欄が出て、書かないと進めない。「録音にもどす」と、欄は消える
+      await p12.click('text=マイクが使えないとき');
+      await p12.click('text=録音なしで進む');
+      await p12.waitForFunction(() => { const a = document.querySelector('#f-answer'); return a && a.offsetParent !== null; });
+      await nextBtn().click();
+      await p12.waitForFunction(() => /マイクが使えないときは、言い方をひらがなで書いてください/.test(document.querySelector('.form-error').textContent));
+      await p12.click('text=録音にもどす');
+      assert.strictEqual(await p12.locator('#f-answer').isVisible(), false);
+      await p12.click('text=マイクが使えないとき');
+      await p12.click('text=録音なしで進む');
+      await p12.fill('#f-answer', 'くっ');
+      await nextBtn().click();
+      await p12.waitForFunction(() => /頭/.test((document.querySelector('.q__prompt') || {}).textContent || ''));
+      assert.strictEqual(await p12.locator('.card--say').count(), 0, '★ のない設問が、発音だけの画面になっている');
+      assert.strictEqual(await p12.locator('#f-answer').isVisible(), true);
+      await until(() => rowsOf(who.id).length === 2, '発音の回答の保存', 20000);
+      const r = rowsOf(who.id);
+      assert.strictEqual(r[0][head.indexOf('設問ID')], 'X013');
+      assert.strictEqual(r[0][head.indexOf('提示語・例文')], '★赤信号が青信号に変わった。');
+      assert.strictEqual(r[0][head.indexOf('回答（地域の言葉）')], '');
+      assert.strictEqual(r[0][head.indexOf('文節（回答）')], '');
+      assert.strictEqual(r[0][head.indexOf('別形・意味・補足')], 'しんごうは しんごー');
+      assert.strictEqual(r[0][head.indexOf('回答の状態')], '回答済');
+      assert.ok(r[0][head.indexOf('録音1')], '録音がついていない');
+      assert.strictEqual(r[1][head.indexOf('提示語・例文')], '★釘');
+      assert.strictEqual(r[1][head.indexOf('回答（地域の言葉）')], 'くっ');
+      assert.strictEqual(r[1][head.indexOf('録音なしの理由')], 'マイクが使えない');
+    } finally {
+      sh.getRange(rowNo, 1, 2, 12).setValues([['', '', '', '', '', '', '', '', '', '', '', ''], ['', '', '', '', '', '', '', '', '', '', '', '']]);
+      await ctx.close();
+      test.page = page;
+    }
+  });
+
   console.log('そのほか');
   await test('保存先への送信は、決まった形（text/plain のPOST）だけ', async () => {
     assert.ok(world.control.calls.length > 10);

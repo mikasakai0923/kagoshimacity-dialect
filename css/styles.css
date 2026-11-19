@@ -410,6 +410,7 @@ h1:focus, h1:focus-visible { outline: none; }
 .q .notice { margin: 16px 0 0; }
 .q__next { margin-top: 22px; display: grid; gap: 14px; }
 .q .q__editing { margin: 0 0 16px; }
+.say__text { margin-top: 16px; }
 
 /* ---------- 歩の回答の一覧 ---------- */
 .rv__title { margin: 4px 0 14px; font-family: var(--font-display); font-weight: 400; font-size: 26px; line-height: 1.35; }
@@ -422,7 +423,7 @@ h1:focus, h1:focus-visible { outline: none; }
 .rv__body { min-width: 0; display: grid; gap: 4px; }
 .rv__line { font-size: 15px; line-height: 1.6; overflow-wrap: anywhere; }
 .rv__line--answer { font-weight: 700; font-size: 20px; line-height: 1.5; }
-.rv__line--status, .rv__line--none { color: var(--ink-2); font-weight: 700; }
+.rv__line--status, .rv__line--none, .rv__line--said { color: var(--ink-2); font-weight: 700; }
 .rv__label { display: inline-block; margin-right: 8px; padding: 0 8px; border-radius: 8px; background: var(--bay-pale); font-size: 13px; font-weight: 700; line-height: 1.8; }
 .rv__fix { align-self: center; }
 .rv__foot { margin-top: 22px; }

@@ -79,6 +79,16 @@
     }
     return [{ label: '言える', value: '○' }, { label: '言えない', value: '×' }];
   };
+  // 発音だけを録る設問：「提示語・例文」の先頭に ★ を付けた、語彙か例文の設問。
+  // 回答を書く欄は出さず、「発音してください」の説明と、録音と、備考の欄だけにする（★ は参加者には見せない）
+  KS.sayOnly = function (item) {
+    return !!item && (item.type === '語彙' || item.type === '例文') && /^\s*★/.test(String(item.prompt || ''));
+  };
+  // 参加者に見せる提示語・例文（先頭の ★ を除いたもの）
+  KS.promptText = function (item) {
+    var p = String((item && item.prompt) || '');
+    return KS.sayOnly(item) ? p.replace(/^\s*★\s*/, '') : p;
+  };
   // 回答の状態（保存先の KS_STATUSES と同じ）
   KS.STATUSES = ['回答済', '知らない', '使わない', '思い出せない'];
   // 補足質問：「場面・意味・読み」の欄の、場面のあとに「補足質問：質問｜選択肢1｜選択肢2」と書くと、
